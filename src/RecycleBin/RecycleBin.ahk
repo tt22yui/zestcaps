@@ -1,4 +1,4 @@
-; ==================================================================
+﻿; ==================================================================
 ; 定时清空回收站 —— 每天固定时刻清空回收站中「删除时间超过 N 天」的项
 ; 清空策略「保留近期 N 天」：只物理删除 $R 数据项与对应 $I 元文件，
 ;   近 N 天内删除的文件（在回收站内可找回）保留不动。
@@ -8,6 +8,10 @@
 ; 实现依赖 Config.ahk（RecycleBinEnabled/RBKeepDays/RBTime）
 ;  与 DebugLog.ahk（DebugLog）
 ; ==================================================================
+
+; 引用 Config.ahk 中定义的全局（顶层声明，避免单文件加载时报 UseUnsetGlobal；
+; Main 按顺序加载时由 Config 生效值覆盖，此处不赋值所以不会破坏配置）
+global RecycleBinEnabled, RBKeepDays, RBTime
 
 ; ----- 每日定时：一次性动态定时器，精确挂到下次执行时刻，触发后自动重新排程下一天 -----
 ; 平时脚本不轮询，仅在接近执行时刻前被唤醒一次，负载趋近于零
@@ -90,7 +94,7 @@ SafeRecycleDelete(RPath, IPath) {
 }
 
 ; 调用 SHFileOperationW 静默永久删除给定物理路径列表
-; pFrom 为双 null 结尾的多路径列表（FO_DELETE | SOLENT | NOCONFIRMATION | NOERRORUI）
+; pFrom 为双 null 结尾的多路径列表（FO_DELETE | SILENT | NOCONFIRMATION | NOERRORUI）
 ShRecycleDelete(paths) {
     try {
         p := ""

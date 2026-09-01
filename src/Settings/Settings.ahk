@@ -138,8 +138,14 @@ OpenSettings() {
     settingsGui.Add("GroupBox", "x28 y40 w332 h150", "定时清空回收站")
     rbCheck := settingsGui.Add("CheckBox", "x44 y62 w306", "每天自动清空回收站（保留近 N 天）")
     rbCheck.Value := RecycleBinEnabled
+    ; 保留天数档位（下拉框选择），按配置当前值定位默认选中项（手动查找，兼容无 Array.IndexOf 的 AHK 版本）
+    RB_KEEP_OPTIONS := ["7", "15", "30"]
+    rbKeepIdx := 1
+    for i, opt in RB_KEEP_OPTIONS
+        if Format("{}", RBKeepDays) = opt
+            rbKeepIdx := i
     settingsGui.Add("Text", "x44 y94 w64 h20", "保留天数")
-    editKeep := settingsGui.Add("Edit", "x110 y90 w64 h22", RBKeepDays)
+    editKeepDays := settingsGui.Add("DropDownList", "x110 y90 w64 Choose" rbKeepIdx, RB_KEEP_OPTIONS)
     settingsGui.Add("Text", "x44 y126 w64 h20", "清空时刻")
     editTime := settingsGui.Add("Edit", "x110 y122 w64 h22", RBTime)
     settingsGui.Add("Text", "x44 y156 w312 h20", "超期自动清除；时刻用 24 时制 HH:mm（如 12:30）")
@@ -147,7 +153,7 @@ OpenSettings() {
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeep, editTime))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTime))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 
