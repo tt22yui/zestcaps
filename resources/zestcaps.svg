@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ZestCaps 程序图标源文件 —— 方案三「循环环」(品牌靛蓝 + 语义三色)
+  色彩对齐 src/Config/Config.ahk：
+    板底 #16171C / 环 #5B8BFF / 箭头 #FFFFFF
+    绿 #3ECF8E / 蓝 #5AA9E6 / 橙 #F0A55A
+  说明：此 SVG 为渲染源仅供维护参考；实际 exe/托盘使用 resources\capslock.ico
+  （由 build.bat / build.yml 引用，多尺寸 256/128/64/48/32/24/16 打包）。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- 暗色圆角底板 -->
+  <rect x="0" y="0" width="256" height="256" rx="57" fill="#16171C"/>
+  <!-- 品牌靛蓝循环环（右上缺口，含箭头） -->
+  <path d="M128 136 A90 90 0 1 1 38 136"
+        stroke="#5B8BFF" stroke-width="17" stroke-linecap="round" fill="none"/>
+  <!-- 白色箭头（缺口处指向顺时针） -->
+  <polygon points="236,128 206,110 206,146" fill="#FFFFFF"/>
+  <!-- 语义三色圆点 -->
+  <circle cx="128" cy="52" r="13" fill="#3ECF8E"/>
+  <circle cx="76" cy="177" r="13" fill="#5AA9E6"/>
+  <circle cx="180" cy="177" r="13" fill="#F0A55A"/>
+</svg>
