@@ -19,6 +19,7 @@ DebugLog("启动耗时: Splash 加载完成 " (A_TickCount - SCRIPT_LOAD_START) 
 #Include "Clipboard\Clipboard.ahk"            ; 剪贴板模块（纯文本粘贴）
 #Include "Screenshot\Screenshot.ahk"  ; 简单截图
 DebugLog("启动耗时: Screenshot 加载完成 " (A_TickCount - SCRIPT_LOAD_START) " ms")
+#Include "RecycleBin\RecycleBin.ahk"      ; 定时清空回收站
 #Include "Hotkeys\Hotkeys.ahk"        ; 可配置快捷键（读取/注册/校验）
 #Include "Settings\Settings.ahk"      ; 设置窗口
 #Include "TrayMenu\TrayMenu.ahk"      ; 托盘菜单

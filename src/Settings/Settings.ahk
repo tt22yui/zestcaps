@@ -9,10 +9,17 @@
 
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
 ; editPasteKey/editShotKey：两个快捷键文本框（AHK 原生格式，如 ^v / F1）
-SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, editPasteKey, editShotKey) {
+; rbOn / editKeepDays / editTime：回收站页开关、保留天数、每日清空时刻(HH:mm)
+SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTime) {
     global CONFIG_FILE
     ; 快捷键冲突校验（非法 / CapsLock / 两功能相同均在此拦截）
     err := ValidateHotkeyPair(editPasteKey.Value, editShotKey.Value, "纯文本粘贴", "区域截图")
+    if err != "" {
+        MsgBox err, "设置", "IconX"
+        return
+    }
+    ; 回收站参数校验（清空时刻格式 / 保留天数合法性）
+    err := ValidateRecycleBin(editKeepDays.Value, editTime.Value)
     if err != "" {
         MsgBox err, "设置", "IconX"
         return
@@ -23,6 +30,10 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
         IniWrite (ScreenshotOn ? 1 : 0), CONFIG_FILE, "Features", "ScreenshotEnabled"
         IniWrite (StartupOn ? 1 : 0), CONFIG_FILE, "Features", "StartupEnabled"
         IniWrite (SplashOn ? 1 : 0), CONFIG_FILE, "Features", "SplashEnabled"
+        IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
+        ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
+        IniWrite Integer(editKeepDays.Value), CONFIG_FILE, "RecycleBin", "KeepDays"
+        IniWrite editTime.Value, CONFIG_FILE, "RecycleBin", "Time"
         ; 快捷键配置写回（重启后由 Hotkeys.ahk 读取并动态注册）
         IniWrite editPasteKey.Value, CONFIG_FILE, "Hotkeys", "PastePlain"
         IniWrite editShotKey.Value, CONFIG_FILE, "Hotkeys", "Screenshot"
@@ -37,6 +48,18 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
     ; 若窗口残留会显得"页面没关闭"，先关窗口可立即反馈
     GuiObj.Destroy()
     RestartScript()
+}
+
+; 校验「定时清空回收站」参数：每日清空时刻 HH:mm 格式 + 保留天数 ≥ 1；合法返回空串，非法返回错误信息
+ValidateRecycleBin(keepDays, time) {
+    if !RegExMatch(time, "^\d{1,2}:\d{2}$")
+        return "清空时刻格式错误，请用 24 小时制 HH:mm（如 12:30）"
+    try {
+        if Integer(keepDays) < 1
+            return "保留天数需至少为 1 天"
+    } catch
+        return "保留天数需为数字"
+    return ""
 }
 
 ; 重启脚本（设置保存 / 托盘「重启」共用）
@@ -61,6 +84,7 @@ OpenSettings() {
     global IndicatorEnabled, PastePlainEnabled, ScreenshotEnabled
     global StartupEnabled, SplashEnabled
     global PastePlainKey, ScreenshotKey
+    global RecycleBinEnabled, RBKeepDays, RBTime
 
     ; 窗口已打开时前置显示，避免重复创建
     if WinExist("设置 - " MENU_TITLE) {
@@ -75,7 +99,7 @@ OpenSettings() {
 
     ; 页签分组：通用（启动相关）/ 指示器 / 剪贴板（粘贴）/ 截图（开关）
     ; 各功能模块开关归入各自页签，对应快捷键跟随所在页签，新增模块只需加页签
-    tabCtl := settingsGui.Add("Tab3", "x14 y12 w360 h240", ["通用", "指示器", "剪贴板", "截图"])
+    tabCtl := settingsGui.Add("Tab3", "x14 y12 w360 h240", ["通用", "指示器", "剪贴板", "截图", "回收站"])
 
     ; ---- 通用页：启动相关设置 ----
     settingsGui.Add("GroupBox", "x28 y40 w332 h116", "启动选项")
@@ -108,10 +132,22 @@ OpenSettings() {
     editShotKey := settingsGui.Add("Edit", "x110 y90 w208 h22", ScreenshotKey)
     settingsGui.Add("Text", "x44 y140 w312 h20", HOTKEY_FORMAT_HINT)
 
+    ; ---- 回收站页：定时清空回收站（开关 + 保留天数 + 每日清空时刻）----
+    ; 布局对齐其他页签：标签左缘 x44、输入框统一起点 x110，两行按同网格排列
+    tabCtl.UseTab(5)
+    settingsGui.Add("GroupBox", "x28 y40 w332 h150", "定时清空回收站")
+    rbCheck := settingsGui.Add("CheckBox", "x44 y62 w306", "每天自动清空回收站（保留近 N 天）")
+    rbCheck.Value := RecycleBinEnabled
+    settingsGui.Add("Text", "x44 y94 w64 h20", "保留天数")
+    editKeep := settingsGui.Add("Edit", "x110 y90 w64 h22", RBKeepDays)
+    settingsGui.Add("Text", "x44 y126 w64 h20", "清空时刻")
+    editTime := settingsGui.Add("Edit", "x110 y122 w64 h22", RBTime)
+    settingsGui.Add("Text", "x44 y156 w312 h20", "超期自动清除；时刻用 24 时制 HH:mm（如 12:30）")
+
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeep, editTime))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 

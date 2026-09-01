@@ -20,6 +20,7 @@ if !FileExist(CONFIG_FILE) {
     IniWrite 1, CONFIG_FILE, "Features", "ScreenshotEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "StartupEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "SplashEnabled"
+    IniWrite 0, CONFIG_FILE, "Features", "RecycleBinEnabled"
 }
 
 ; ==================================================================
@@ -81,6 +82,17 @@ PastePlainEnabled       := IniRead(CONFIG_FILE, "Features", "PastePlainEnabled",
 ScreenshotEnabled       := IniRead(CONFIG_FILE, "Features", "ScreenshotEnabled", 1) = "1"            ; 简单截图（默认 F1，热键可配置）：1=开 0=关
 StartupEnabled          := IniRead(CONFIG_FILE, "Features", "StartupEnabled", 1) = "1"                ; 开机自动启动：1=开 0=关
 SplashEnabled           := IniRead(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
+RecycleBinEnabled       := IniRead(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
+; ==================================================================
+; 定时清空回收站参数（KeepDays/Time 由设置页保存到 config.ini 的 [RecycleBin] 段）
+; ==================================================================
+RB_DEFAULT_KEEP_DAYS    := 30                                         ; 默认保留天数：删除超过 N 天才清空
+RB_DEFAULT_TIME         := "12:00"                                    ; 默认每日执行时刻（HH:mm，24 小时制）
+RecycleBinKeepDays      := Integer(IniRead(CONFIG_FILE, "RecycleBin", "KeepDays", RB_DEFAULT_KEEP_DAYS))  ; 保留天数（设置页可调）
+RecycleBinTime          := IniRead(CONFIG_FILE, "RecycleBin", "Time", RB_DEFAULT_TIME)  ; 每日执行时刻 HH:mm（设置页可调）
+; 模块内引用名（RB* 前缀）读取自 config.ini
+RBKeepDays              := RecycleBinKeepDays
+RBTime                  := RecycleBinTime
 ; ==================================================================
 
 ; ==================================================================
