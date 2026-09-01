@@ -1,0 +1,45 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+log/*
+
+
+### vs code ##
+.vscode
+.vscode/private-folder-alias.json
+*.code-workspace
+
+*.log
+src/Log/
+
+output/
+config.ini
+tmp/
+
+# Yunit 单测产物（CI 收集用，不入仓库）
+**/junit_unit_*.xml
+
+# 编辑器/工具私有配置
+.trae/
+

@@ -1,0 +1,107 @@
+name: Build
+
+on:
+  workflow_dispatch:            # 手动触发（主要方式）
+  push:
+    tags:
+      - 'v*'                    # 推送 v* 标签时自动发布正式版
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write           # 允许创建 Release / 上传产物
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 下载官方 Zip 解释器（供单测运行）
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          # 从 GitHub Releases CDN 直接下载官方便携 ZIP（不走 autohotkey.com，避开 Cloudflare 拦截）。
+          # 版本升级时同步更新下方 URL 中的 2.0.26（须不低于 src\Main.ahk 的 #Requires）。
+          $url = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.26/AutoHotkey_2.0.26.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "ahk.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "ahk") -Force
+          $baseExe = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" | Select-Object -First 1
+          if (-not $baseExe) { throw "官方 Zip 未包含 AutoHotkey64.exe" }
+          Write-Host "AHK_BASE=$($baseExe.FullName)"
+          "AHK_BASE=$($baseExe.FullName)" | Out-File -Append $env:GITHUB_ENV -Encoding utf8
+
+      - name: 运行聚合测试（失败则中止发布）
+        shell: pwsh
+        run: |
+          # GUI 程序用 & 拿不到 $LASTEXITCODE，改用 Start-Process -PassThru 读退出码
+          $p = Start-Process -FilePath $env:AHK_BASE -ArgumentList "test\run_all_tests.ahk" -Wait -PassThru
+          $testExit = $p.ExitCode
+          Write-Host "测试退出码=$testExit"
+          if ($testExit -ne 0) {
+            Write-Error "测试未全部通过，退出码=$testExit"
+            exit $testExit
+          }
+
+      - name: 确定版本号
+        id: version
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref }}"
+          $tag = $null
+          if ($ref -like 'refs/tags/*') {
+            $tag = "${{ github.ref_name }}"
+            $v = $tag -replace '^v', ''
+          }
+          else {
+            $line = Get-Content "src\Config\Config.ahk" -Encoding UTF8 |
+              Where-Object { $_ -match '^\s*APP_VERSION\s*:=' } | Select-Object -First 1
+            $m = [regex]::Match($line, '"([^"]+)"')
+            $v = if ($m.Success) { $m.Groups[1].Value } else { "dev" }
+            $tag = "v$v"
+          }
+          Write-Host "version=$v  tag=$tag"
+          "version=$v" | Out-File -Append $env:GITHUB_OUTPUT -Encoding utf8
+          "tag=$tag"   | Out-File -Append $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: 确保输出目录存在
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "output" | Out-Null
+
+      - name: 编译 exe（复用成熟 Ahk2Exe action）
+        uses: benmusson/ahk2exe-action@v1
+        with:
+          in: src\Main.ahk
+          out: output\zestcaps_v${{ steps.version.outputs.version }}.exe
+          icon: resources\capslock.ico
+          target: x64
+          compression: none        # 不压缩，降低杀软误报（与本地 build.bat 一致）
+          ahk-tag: v2.0.26
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 校验产物存在
+        shell: pwsh
+        run: |
+          $exe = "output\zestcaps_v${{ steps.version.outputs.version }}.exe"
+          if (-not (Test-Path $exe)) { throw "产物未生成: $exe" }
+          Write-Host "产物已生成: $exe"
+
+      - name: 生成 SHA256 校验值
+        shell: pwsh
+        run: |
+          $exe = "output\zestcaps_v${{ steps.version.outputs.version }}.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $exe).Hash.ToLower()
+          $shaFile = "$exe.sha256"
+          "$hash  $([System.IO.Path]::GetFileName($exe))" | Out-File -FilePath $shaFile -Encoding ascii
+          Write-Host "已生成: $shaFile"
+
+      - name: 发布到 GitHub Releases
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ZestCaps v${{ steps.version.outputs.version }}
+          files: |
+            output/zestcaps_v${{ steps.version.outputs.version }}.exe
+            output/zestcaps_v${{ steps.version.outputs.version }}.exe.sha256
+          generate_release_notes: true
+          draft: true            # 先存草稿，人工确认后再正式发布
