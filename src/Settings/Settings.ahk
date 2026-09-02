@@ -7,10 +7,22 @@
 ; 保存后写回 config.ini 并重启脚本生效（与 Config.ahk 的读取约定一致）
 ; ==================================================================
 
+; ==================================================================
+; 每日清空时刻：两个「时/分」Edit + UpDown（0-23 / 0-59）组成的纯时间输入
+; 用原生 AHK 控件，完全受 Tab3 页签与布局管理，不会像 Win32 裸控件那样
+; 切页不跟随/错位；无日历、无日期，仅有上下微调 + 直接键入，杜绝非法时刻
+; 越界输入由 UpDown 的 Range 自动钳制到合法区间
+; ==================================================================
+
+; 读取「时/分」两个 UpDown 编辑框，拼成 24 时制 "HH:mm"（补零）
+ReadRBTime(hourEdit, minEdit) {
+    return Format("{:02}:{:02}", Integer(hourEdit.Value), Integer(minEdit.Value))
+}
+
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
 ; editPasteKey/editShotKey：两个快捷键文本框（AHK 原生格式，如 ^v / F1）
-; rbOn / editKeepDays / editTime：回收站页开关、保留天数、每日清空时刻(HH:mm)
-SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTime) {
+; rbOn / editKeepDays / editTimeHour / editTimeMin：回收站页开关、保留天数、每日清空时刻（时/分两个 UpDown 编辑框）
+SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
     global CONFIG_FILE
     ; 快捷键冲突校验（非法 / CapsLock / 两功能相同均在此拦截）
     err := ValidateHotkeyPair(editPasteKey.Value, editShotKey.Value, "纯文本粘贴", "区域截图")
@@ -19,7 +31,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
         return
     }
     ; 回收站参数校验（清空时刻格式 / 保留天数合法性）
-    err := ValidateRecycleBin(editKeepDays.Value, editTime.Value)
+    err := ValidateRecycleBin(editKeepDays.Value, ReadRBTime(editTimeHour, editTimeMin))
     if err != "" {
         MsgBox err, "设置", "IconX"
         return
@@ -33,7 +45,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
         IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
         ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
         IniWrite Integer(editKeepDays.Value), CONFIG_FILE, "RecycleBin", "KeepDays"
-        IniWrite editTime.Value, CONFIG_FILE, "RecycleBin", "Time"
+        IniWrite ReadRBTime(editTimeHour, editTimeMin), CONFIG_FILE, "RecycleBin", "Time"
         ; 快捷键配置写回（重启后由 Hotkeys.ahk 读取并动态注册）
         IniWrite editPasteKey.Value, CONFIG_FILE, "Hotkeys", "PastePlain"
         IniWrite editShotKey.Value, CONFIG_FILE, "Hotkeys", "Screenshot"
@@ -146,14 +158,25 @@ OpenSettings() {
             rbKeepIdx := i
     settingsGui.Add("Text", "x44 y94 w64 h20", "保留天数")
     editKeepDays := settingsGui.Add("DropDownList", "x110 y90 w64 Choose" rbKeepIdx, RB_KEEP_OPTIONS)
-    settingsGui.Add("Text", "x44 y126 w64 h20", "清空时刻")
-    editTime := settingsGui.Add("Edit", "x110 y122 w64 h22", RBTime)
-    settingsGui.Add("Text", "x44 y156 w312 h20", "超期自动清除；时刻用 24 时制 HH:mm（如 12:30）")
+    settingsGui.Add("Text", "x44 y126 w64 h20", "执行时刻")
+    ; 纯时间输入：时/分两个 Edit + UpDown 微调（Range 0-23 / 0-59），越界自动钳制；
+    ; 用原生 AHK 控件，天然受 Tab3 页签与布局管理，无日历、无日期、不串位
+    editTimeHour := settingsGui.Add("Edit", "x110 y122 w40")
+    uddTimeHour := settingsGui.Add("UpDown", "Range0-23")
+    settingsGui.Add("Text", "x152 y126", ":")
+    editTimeMin := settingsGui.Add("Edit", "x164 y122 w40")
+    uddTimeMin := settingsGui.Add("UpDown", "Range0-59")
+    ; 初始值由 RBTime 还原：先设 UpDown.Value（Range 会钳制非法值），再补齐两位显示
+    uddTimeHour.Value := Integer(SubStr(RBTime, 1, 2))
+    uddTimeMin.Value  := Integer(SubStr(RBTime, 4, 2))
+    editTimeHour.Text := Format("{:02}", uddTimeHour.Value)
+    editTimeMin.Text  := Format("{:02}", uddTimeMin.Value)
+    settingsGui.Add("Text", "x44 y156 w312 h20", "上下微调或直接输入 24 时制")
 
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTime))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 
