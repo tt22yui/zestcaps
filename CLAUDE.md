@@ -144,7 +144,7 @@
 
 - 版本号获取方式：tag 触发取 tag 名，手动触发从 `src/Config/Config.ahk` 读取 `APP_VERSION`。
 
-- 发布产物需创建为 draft Release，确认后再正式发布。
+- 发布策略：打标签直接正式发布（不再存草稿）。
 
 - 版本号升级只需修改 `src/Config/Config.ahk` 的 `APP_VERSION`（启动日志、托盘标题、构建产物命名均自动同步）。
 
