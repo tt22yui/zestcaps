@@ -64,6 +64,35 @@ jobs:
           "version=$v" | Out-File -Append $env:GITHUB_OUTPUT -Encoding utf8
           "tag=$tag"   | Out-File -Append $env:GITHUB_OUTPUT -Encoding utf8
 
+      - name: 提取 CHANGELOG 发布日志（作为 Release 正文）
+        shell: pwsh
+        env:
+          VERS: ${{ steps.version.outputs.version }}
+        run: |
+          # 从 CHANGELOG.md 中按当前版本号提取对应段落（`## [<版本>] - ...` 到下一个 `## [`），
+          # 写入 release_body.md，作为打标签发布时的 Release 正文。
+          $v = $env:VERS
+          $lines = Get-Content "CHANGELOG.md" -Encoding UTF8
+          $headerRe = '^## \[\s*' + [regex]::Escape($v) + '\s*\]'
+          $start = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match $headerRe) { $start = $i; break }
+          }
+          if ($start -ge 0) {
+            $end = $lines.Count
+            for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match '^## \[') { $end = $i; break }
+            }
+            $body = ($lines[$start..($end - 1)] -join "`n").Trim()
+          }
+          else {
+            $body = "> 未在 CHANGELOG.md 中检索到 [$v] 对应的发布日志，请补充后重新打标签。"
+          }
+          if ($body -eq "") { $body = "> 该版本暂无发布日志。" }
+          # PowerShell 7 下 Set-Content -Encoding UTF8 输出无 BOM，可直接作为 GitHub 正文。
+          Set-Content -Path "release_body.md" -Value $body -Encoding UTF8
+          Write-Host "发布日志已提取，长度=$($body.Length)"
+
       - name: 确保输出目录存在
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path "output" | Out-Null
@@ -103,5 +132,5 @@ jobs:
           files: |
             output/zestcaps_v${{ steps.version.outputs.version }}.exe
             output/zestcaps_v${{ steps.version.outputs.version }}.exe.sha256
-          generate_release_notes: true
+          body_path: release_body.md   # 使用 CHANGELOG 中对应版本的发布日志作为正文
           draft: true            # 先存草稿，人工确认后再正式发布
