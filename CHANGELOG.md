@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-02
+
+新增回收站定时清理功能。
+
+### 新增
+
+- **回收站定时清空**：设置窗口可配置定时清理回收站
+  - 可设置执行时刻，使用时分微调时间控件，上下微调或直接输入 24 时制
+  - 到点自动清空回收站，便于无人值守时的磁盘空间维护
+
 ## [0.1.0] - 2026-09-01
 
 首版开源发布。
@@ -30,4 +40,5 @@
 - 全局未捕获错误处理与调试日志，配备按键看门狗防假死
 
 [Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.1.0...HEAD
+[0.2.1]: https://github.com/tt22yui/zestcaps/releases/tag/v0.2.1
 [0.1.0]: https://github.com/tt22yui/zestcaps/releases/tag/v0.1.0
