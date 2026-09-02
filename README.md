@@ -1,6 +1,6 @@
 # ZestCaps
 
-> v0.1.0 — [MIT License](LICENSE)
+> v0.2.1 — [MIT License](LICENSE)
 
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -48,6 +48,13 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 
 - 设置窗口一键开关
 
+### 7. 定时清空回收站
+
+- 按每天固定时刻，自动清空回收站中**删除时间超过保留天数**的项（「保留近期 N 天」策略）
+- 设置窗口可配置：开关、保留天数（7 / 15 / 30 天）、每日执行时刻（时/分微调，24 时制）
+- 定时器为一次动态排程，仅在接近执行时刻前唤醒一次，空闲时零负载
+- 默认关闭
+
 ## 输入法检测原理
 
 ```text
@@ -81,6 +88,8 @@ src\
 ├── Clipboard\
 │   ├── Clipboard.ahk   剪贴板模块入口（纯文本粘贴）
 │   └── PastePlain.ahk  纯文本粘贴（默认 Ctrl+Shift+V，可配置）
+├── RecycleBin\
+│   └── RecycleBin.ahk  定时清空回收站（保留 N 天，每日固定时刻触发）
 ├── Hotkeys\
 │   └── Hotkeys.ahk     可配置快捷键（读取/注册/校验，存 [Hotkeys] 段）
 ├── Settings\
@@ -110,6 +119,7 @@ build.bat                编译脚本（输出 output\zestcaps.exe）
   - 菜单文字（`MENU_TITLE`、`MENU_SETTINGS`、`MENU_RESTART`、`MENU_EXIT`）
   - 指示器文字/颜色/尺寸/偏移/字体（`IND_*`）
   - CapsLock 短按/长按判定阈值（`CAPS_*`）
+  - 回收站保留天数/执行时刻（`RB_*`、`RecycleBinKeepDays`、`RecycleBinTime`）
   - 启动闪屏尺寸/时长/配色（`SPLASH_*`）
   - 截图/选区/标注编辑窗参数（`SCREENSHOT_FILENAME`、`SEL_*`、`EDIT_*`、`SCREENSHOT_TIMEOUT_MS` 等）
 
