@@ -133,4 +133,4 @@ jobs:
             output/zestcaps_v${{ steps.version.outputs.version }}.exe
             output/zestcaps_v${{ steps.version.outputs.version }}.exe.sha256
           body_path: release_body.md   # 使用 CHANGELOG 中对应版本的发布日志作为正文
-          draft: true            # 先存草稿，人工确认后再正式发布
+          draft: false           # 打标签直接正式发布（不再先存草稿）
