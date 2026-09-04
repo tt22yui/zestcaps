@@ -22,7 +22,7 @@ ReadRBTime(hourEdit, minEdit) {
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
 ; editPasteKey/editShotKey：两个快捷键文本框（AHK 原生格式，如 ^v / F1）
 ; rbOn / editKeepDays / editTimeHour / editTimeMin：回收站页开关、保留天数、每日清空时刻（时/分两个 UpDown 编辑框）
-SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
+SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, DesktopShortcutOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
     global CONFIG_FILE
     ; 快捷键冲突校验（非法 / CapsLock / 两功能相同均在此拦截）
     err := ValidateHotkeyPair(editPasteKey.Value, editShotKey.Value, "纯文本粘贴", "区域截图")
@@ -41,6 +41,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
         IniWrite (PasteOn ? 1 : 0), CONFIG_FILE, "Features", "PastePlainEnabled"
         IniWrite (ScreenshotOn ? 1 : 0), CONFIG_FILE, "Features", "ScreenshotEnabled"
         IniWrite (StartupOn ? 1 : 0), CONFIG_FILE, "Features", "StartupEnabled"
+        IniWrite (DesktopShortcutOn ? 1 : 0), CONFIG_FILE, "Features", "DesktopShortcutEnabled"
         IniWrite (SplashOn ? 1 : 0), CONFIG_FILE, "Features", "SplashEnabled"
         IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
         ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
@@ -51,6 +52,8 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, ed
         IniWrite editShotKey.Value, CONFIG_FILE, "Hotkeys", "Screenshot"
         ; 同步开机启动快捷方式（config.ini 状态与系统启动项保持一致）
         SetStartup(StartupOn)
+        ; 同步桌面快捷方式（config.ini 状态与桌面快捷方式保持一致）
+        SetDesktopShortcut(DesktopShortcutOn)
     } catch as err {
         MsgBox "保存设置失败：" err.Message, "设置", "IconX"
         return
@@ -94,7 +97,7 @@ OpenSettings() {
     global MENU_TITLE
     global HOTKEY_FORMAT_HINT
     global IndicatorEnabled, PastePlainEnabled, ScreenshotEnabled
-    global StartupEnabled, SplashEnabled
+    global StartupEnabled, SplashEnabled, DesktopShortcutEnabled
     global PastePlainKey, ScreenshotKey
     global RecycleBinEnabled, RBKeepDays, RBTime
 
@@ -114,11 +117,13 @@ OpenSettings() {
     tabCtl := settingsGui.Add("Tab3", "x14 y12 w360 h240", ["通用", "指示器", "剪贴板", "截图", "回收站"])
 
     ; ---- 通用页：启动相关设置 ----
-    settingsGui.Add("GroupBox", "x28 y40 w332 h116", "启动选项")
+    settingsGui.Add("GroupBox", "x28 y40 w332 h140", "启动选项")
     cbStartup := settingsGui.Add("CheckBox", "x44 y64 w306", "开机自动启动")
     cbStartup.Value := StartupEnabled
     cbSplash := settingsGui.Add("CheckBox", "x44 y88 w306", "启动闪屏动画")
     cbSplash.Value := SplashEnabled
+    cbDesktopShortcut := settingsGui.Add("CheckBox", "x44 y112 w306", "创建桌面快捷方式")
+    cbDesktopShortcut.Value := DesktopShortcutEnabled
 
     ; ---- 指示器页 ----
     tabCtl.UseTab(2)
@@ -176,7 +181,7 @@ OpenSettings() {
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, cbDesktopShortcut.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 

@@ -18,7 +18,8 @@ if !FileExist(CONFIG_FILE) {
     IniWrite 1, CONFIG_FILE, "Indicator", "IndicatorEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "PastePlainEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "ScreenshotEnabled"
-    IniWrite 1, CONFIG_FILE, "Features", "StartupEnabled"
+    IniWrite 0, CONFIG_FILE, "Features", "StartupEnabled"
+    IniWrite 0, CONFIG_FILE, "Features", "DesktopShortcutEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "SplashEnabled"
     IniWrite 0, CONFIG_FILE, "Features", "RecycleBinEnabled"
 }
@@ -80,7 +81,8 @@ CAPS_WATCHDOG_INTERVAL_MS   := 2000  ; 看门狗检测周期（毫秒）
 IndicatorEnabled        := IniRead(CONFIG_FILE, "Indicator", "IndicatorEnabled", 1) = "1"            ; 鼠标输入状态指示器：1=开 0=关
 PastePlainEnabled       := IniRead(CONFIG_FILE, "Features", "PastePlainEnabled", 1) = "1"            ; 纯文本粘贴（默认 Ctrl+Shift+V，热键可配置）：1=开 0=关
 ScreenshotEnabled       := IniRead(CONFIG_FILE, "Features", "ScreenshotEnabled", 1) = "1"            ; 简单截图（默认 F1，热键可配置）：1=开 0=关
-StartupEnabled          := IniRead(CONFIG_FILE, "Features", "StartupEnabled", 1) = "1"                ; 开机自动启动：1=开 0=关
+StartupEnabled          := IniRead(CONFIG_FILE, "Features", "StartupEnabled", 0) = "1"                ; 开机自动启动：1=开 0=关（默认关）
+DesktopShortcutEnabled  := IniRead(CONFIG_FILE, "Features", "DesktopShortcutEnabled", 0) = "1"          ; 桌面快捷方式：1=创建 0=不创建（默认关）
 SplashEnabled           := IniRead(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
 RecycleBinEnabled       := IniRead(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
 ; ==================================================================

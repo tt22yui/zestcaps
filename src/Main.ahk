@@ -13,6 +13,7 @@ OnExit ReleaseAllModifiers ; 退出时强制释放所有修饰键，防止按键
 #Include "Splash\Splash.ahk"          ; 启动闪屏动画（尽早加载，覆盖后续模块加载过程）
 DebugLog("启动耗时: Splash 加载完成 " (A_TickCount - SCRIPT_LOAD_START) " ms")
 #Include "Startup\Startup.ahk"        ; 开机启动
+#Include "DesktopShortcut\DesktopShortcut.ahk"  ; 桌面快捷方式
 #Include "Indicator\IME.ahk"            ; 输入法状态检测
 #Include "Indicator\Indicator.ahk"    ; 输入状态指示器
 #Include "InputSwitch\CapsLock.ahk"    ; CapsLock 键行为

@@ -44,9 +44,10 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 - 淡入淡出自动关闭，定时器驱动，不阻塞热键注册
 - 基于 GDI+ 分层窗口绘制，无需任何图片资源
 
-### 6. 开机自启
+### 6. 启动选项
 
-- 设置窗口一键开关
+- **开机自启**：通过开始菜单启动文件夹的快捷方式实现，设置窗口一键开关；默认关闭
+- **创建桌面快捷方式**：在桌面生成 `ZestCaps.lnk`，设置窗口一键开关；默认关闭（勾选后创建，取消勾选即删除）
 
 ### 7. 定时清空回收站
 
@@ -78,6 +79,8 @@ src\
 │   └── GlobalError.ahk 全局未捕获错误处理（写日志、防弹框）
 ├── Startup\
 │   └── Startup.ahk     开机启动检测与切换
+├── DesktopShortcut\
+│   └── DesktopShortcut.ahk  桌面快捷方式创建与删除
 ├── Splash\
 │   └── Splash.ahk      启动闪屏动画（GDI+ 分层窗口，纯代码绘制）
 ├── Indicator\
@@ -113,7 +116,7 @@ build.bat                编译脚本（输出 output\zestcaps.exe）
 ## 配置说明
 
 - `config.ini`：功能开关与可配置快捷键
-  - 功能开关初始状态（`IndicatorEnabled`、`PastePlainEnabled`、`ScreenshotEnabled`），设置窗口保存时自动写回
+  - 功能开关初始状态（`IndicatorEnabled`、`PastePlainEnabled`、`ScreenshotEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`），设置窗口保存时自动写回
   - 可配置快捷键（`[Hotkeys]` 段：`PastePlain`、`Screenshot`），在设置窗口「快捷键」文本框直接填写 AHK 原生格式（如 `^v`、`F1`），保存后重启生效
 - `src\Config\Config.ahk`：其余参数硬编码
   - 菜单文字（`MENU_TITLE`、`MENU_SETTINGS`、`MENU_RESTART`、`MENU_EXIT`）
