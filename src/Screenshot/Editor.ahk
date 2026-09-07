@@ -31,6 +31,8 @@ global EditorToolbar := 0       ; 工具栏（第一行：工具/清除/输出�
 global EditorToolbarW := 0, EditorToolbarH := 0  ; 工具栏尺寸缓存（创建时获取一次，拖动定位时复用，避免每帧 WinGetPos）
 global EditorColorToolbar := 0  ; 颜色工具栏（第二行：颜色行 + 粗细档位，始终显示，与选区颜色行同结构）
 global EditorColorToolbarW := 0, EditorColorToolbarH := 0  ; 颜色工具栏尺寸缓存
+global ToolbarPhase := ""       ; 工具栏当前阶段（"selection" 选区 / "editor" 编辑），决定按钮点击行为
+global ScreenToolbarResult := ""  ; 选区阶段动作结果通道（"editor"/save/pin/copy），替代对选区局部 state 的引用
 global EditorToolButtons := Map()  ; 工具名 → 按钮控件（刷新选中态）
 global EditorToolLabels := Map()   ; 工具名 → 基础标签（如 "箭头"）
 global EditorColorSwatches := []   ; 颜色索引 → 色块内块控件（刷新选中态）
@@ -148,8 +150,12 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
         if leftoverCleanup
             leftoverCleanup()
 
-        ; 悬浮工具栏：置于编辑窗正下方（定位见 EditorRepositionToolbar，以编辑窗为锚点）
-        EditorCreateToolbar()
+        ; 悬浮工具栏：选区已 promote（row1 持久）则补行2并锚到编辑窗，过渡无跳动；
+        ; 否则（快速截图无选区工具栏）全量构建两行
+        if EditorToolbar
+            EditorPromoteSelectionToolbar()
+        else
+            EditorCreateToolbar()
         EditorToolbarRefresh()
 
         ; 等待用户操作（按钮回调 / Esc 设置 EditorResult）
@@ -509,63 +515,95 @@ EditorRButtonDown(wParam, lParam, msg, hwnd) {
 ; 悬浮工具栏（置于编辑窗下方）
 ; ------------------------------------------------------------------
 EditorCreateToolbar() {
-    global EditorToolbar, EditorToolbarW, EditorToolbarH
-    global EditorColorToolbar, EditorColorToolbarW, EditorColorToolbarH
-    global EditorToolButtons, EditorToolLabels, EditorColorSwatches, EditorSwatchFrames
-    global EditorPenWidthFrames
-    global ToolbarHoverActive, ToolbarHoverAux
-    global EditorHwnd
-    global EDIT_COLORS, EDIT_TB_BG, EDIT_TB_SEP, EDIT_TB_BTN_BG, EDIT_TB_BTN_TEXT, EDIT_TB_RING
-    global EDIT_LINE_WIDTHS, EDIT_LINE_WIDTH_DISPLAY
-    ; DPI 缩放：字体 s11 由 AHK 按 DPI 自动放大，控件尺寸需手动等比放大（ToolbarDpi）。
-    ; 工具栏与编辑窗同显示器（置于其正下方），直接复用编辑窗 DPI（编辑窗已 Show，DPI 有效）
+    global EditorHwnd, ToolbarPhase
+    ; 快捷路径（无选区工具栏 promote）进入编辑：全量构建两行，复用编辑窗 DPI
+    if EditorToolbar
+        return  ; 已被选区 promote，不该走全量（防御）
     SetToolbarDpiScale(EditorHwnd)
+    ScreenToolbarCreateRow1(EditorHwnd)
+    ScreenToolbarCreateRow2()
+    ToolbarPhase := "editor"
+    ShowToolbarRows()
+}
+
+; ------------------------------------------------------------------
+; 构建工具栏第一行（工具 + 保存/钉屏/复制）：选区与编辑共用同一行、跨阶段持久
+; dpiFrom > 0：复用该已显示窗口 DPI（编辑窗路径）；否则按选区写法临时显示读鼠标所在屏 DPI
+; 幂等：已存在则直接返回，避免同一控件二次 OnEvent 注册（AHK v2 二次注册是追加 handler）
+; ------------------------------------------------------------------
+ScreenToolbarCreateRow1(dpiFrom := 0) {
+    global EditorToolbar, EditorToolbarW, EditorToolbarH
+    global EditorToolButtons, EditorToolLabels
+    global ToolbarHoverActive
+    global EDIT_TB_BG, EDIT_TB_SEP
+    if EditorToolbar
+        return EditorToolbar
     ; 防御性重置（正常流程中清理函数已清空，这里兜底防重复调用时累积）
     EditorToolButtons := Map()
     EditorToolLabels := Map()
-    EditorColorSwatches := []
-    EditorSwatchFrames := []
-    EditorPenWidthFrames := []
-
-    ; ---- 第一行：工具按钮 + 输出（保存/钉屏/复制），与选区工具栏第一行同结构 ----
     ; 深色主题面板，微软雅黑字体（按钮统一 24 高：文字按钮/色块/分隔线对齐）
     EditorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
-    EditorToolbar.MarginX := ToolbarDpi(6)
-    EditorToolbar.MarginY := ToolbarDpi(5)
     EditorToolbar.BackColor := EDIT_TB_BG
     EditorToolbar.SetFont("s11", "Microsoft YaHei")
     tb := EditorToolbar
+    if dpiFrom > 0
+        SetToolbarDpiScale(dpiFrom)
+    else {
+        ; 未 Show 的窗口无有效 DPI：先临时显示到鼠标位置读取所在显示器 DPI，再按缩放因子建控件
+        MouseGetPos &dpiX, &dpiY
+        tb.Show("NA x" dpiX " y" dpiY " w10 h10")
+        SetToolbarDpiScale(tb.Hwnd)
+        tb.Hide()  ; 读完 DPI 立即隐藏，剩余构建全程不可见，仅以离屏方式量尺寸
+    }
+    tb.MarginX := ToolbarDpi(6)
+    tb.MarginY := ToolbarDpi(5)
     ; 通用扁平按钮悬停状态（选区工具栏与编辑窗工具栏共用同一套窗口级鼠标处理）
     tb.HoverState := ToolbarHoverState()
     ToolbarHoverActive := tb.HoverState
     tb.HoverState.selFn := EditorIsSelectedTool.Bind(EditorToolButtons)  ; 仅工具按钮参与选中态
 
     ; 工具按钮区（PixPin 风格：矩形 / 箭头 / 椭圆 / 马赛克，选中态由 EditorToolbarRefresh 刷新）
-    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克），
-    ; 悬停提示给出中文工具名；.Bind 捕获循环值（AHK v2 闭包读不到 for 循环变量）
+    ; 点击行为由 ToolbarPhase 分流：选区阶段=选工具+自动选第1色+进入编辑；编辑阶段=仅切工具
+    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克）
     tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["▦", "mosaic", "马赛克"]]
     for t in tools {
-        c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", EditorSetTool.Bind(t[2]), t[3])
+        c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", ToolbarToolClick.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c
         EditorToolLabels[t[2]] := t[1]
     }
 
-    ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右：复制后关闭编辑器，退出由 Esc 承担）
+    ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右），点击行为由 ToolbarPhase 分流
     ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制），
-    ; 需显式指定图标字体，否则默认正文字体下缺字；悬停提示给出中文动作名
     ToolbarSeparator(tb)
-    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", EditorSave, "保存")
-    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", EditorPin, "钉屏")  ; 实心图钉 PinnedFill
-    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", EditorCopy, "复制")
+    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("save"), "保存")
+    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("pin"), "钉屏")  ; 实心图钉 PinnedFill
+    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("copy"), "复制")
 
-    ; 先 AutoSize 拿到实际尺寸（缓存，拖动定位时复用，避免每帧 WinGetPos），
-    ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用）
-    tb.Show("NA AutoSize")
+    ; 先 AutoSize 拿实际尺寸（缓存，拖动定位时复用，避免每帧 WinGetPos），
+    ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用）。
+    ; 离屏测量（x-32000）：量尺寸全程不可见，两行量好后由调用方统一定位再显示，杜绝「先闪现再跳位」
+    tb.Show("NA x-32000 y-32000 AutoSize")
     WinGetPos &tx, &ty, &tw, &th, "ahk_id " EditorToolbar.Hwnd
     EditorToolbarW := tw, EditorToolbarH := th
     tb.HoverState.CacheRects()
+    tb.Hide()
+    return EditorToolbar
+}
 
-    ; ---- 第二行：颜色行（"颜色"标签 + 色块 + 粗细档位 + 清除，与选区颜色行同结构，清除并入此行）----
+; ------------------------------------------------------------------
+; 构建工具栏第二行（色块 + 三档线宽 + 清除）—— 仅编辑阶段显示，选区阶段隐藏
+; 幂等：已存在则直接返回
+; ------------------------------------------------------------------
+ScreenToolbarCreateRow2() {
+    global EditorColorToolbar, EditorColorToolbarW, EditorColorToolbarH
+    global EditorColorSwatches, EditorSwatchFrames, EditorPenWidthFrames
+    global ToolbarHoverAux
+    global EDIT_COLORS, EDIT_TB_BG, EDIT_LINE_WIDTHS, EDIT_LINE_WIDTH_DISPLAY
+    if EditorColorToolbar
+        return EditorColorToolbar
+    EditorColorSwatches := []
+    EditorSwatchFrames := []
+    EditorPenWidthFrames := []
     EditorColorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
     EditorColorToolbar.MarginX := ToolbarDpi(6)
     EditorColorToolbar.MarginY := ToolbarDpi(5)
@@ -589,16 +627,67 @@ EditorCreateToolbar() {
     ctb.HoverState := ToolbarHoverState()  ; 清除按钮走同一套悬停样式（独立实例，经 ToolbarHoverAux 分发）
     ctb.HoverState.AddIcon(ctb, Chr(0xE74D), "Segoe MDL2 Assets", EditorClear, "清除")  ; MDL2 Delete 清除
     ToolbarHoverAux := ctb.HoverState
-    ctb.Show("NA AutoSize")
+    ctb.Show("NA x-32000 y-32000 AutoSize")  ; 离屏测量，避免在系统默认放置点闪现后跳位
     WinGetPos &ctx, &cty, &ctw, &cth, "ahk_id " EditorColorToolbar.Hwnd
     EditorColorToolbarW := ctw, EditorColorToolbarH := cth
     ctb.HoverState.CacheRects()
+    ctb.Hide()
+    return EditorColorToolbar
+}
 
-    ; 两行整体定位：置于编辑窗下方居中（锚点 = 编辑窗）
+; ------------------------------------------------------------------
+; 显示已构建的工具栏行并定位到编辑窗下方、淡入（row1 可单独存在，row2 存在则一并显示）
+; ------------------------------------------------------------------
+ShowToolbarRows() {
+    global EditorToolbar, EditorColorToolbar
     EditorRepositionToolbar()
-    ; 两行工具栏淡入出现（约 130ms），避免编辑窗就绪后工具栏"硬出现"
+    EditorToolbar.Show("NA")
+    if EditorColorToolbar
+        EditorColorToolbar.Show("NA")
     ToolbarFadeIn(EditorToolbar.Hwnd)
-    ToolbarFadeIn(EditorColorToolbar.Hwnd)
+    if EditorColorToolbar
+        ToolbarFadeIn(EditorColorToolbar.Hwnd)
+}
+
+; 选区 → 编辑过渡：row1 已在选区阶段持久存在，这里只补行2、切阶段、把锚点从「选区矩形」
+; 重锚到「编辑窗」（编辑窗就位于选区之上，row1 视觉上原样保留不重建，过渡无跳动）
+EditorPromoteSelectionToolbar() {
+    global EditorHwnd, ToolbarPhase
+    SetToolbarDpiScale(EditorHwnd)  ; row2 与编辑窗同屏，复用其 DPI
+    ScreenToolbarCreateRow2()
+    ToolbarPhase := "editor"
+    ShowToolbarRows()
+}
+
+; ------------------------------------------------------------------
+; 工具栏按钮回调（阶段分发，单一回调避免 OnEvent 二次注册追加 handler）
+; ------------------------------------------------------------------
+; 工具按钮：选区阶段 = 选工具 + 自动选第 1 色（红）+ 进入编辑（ScreenToolbarResult）；
+;          编辑阶段 = 仅切工具（颜色/线宽独立，不重置）
+ToolbarToolClick(name, *) {
+    global ToolbarPhase, EditorTool, EditorColorIdx, ScreenToolbarResult
+    if ToolbarPhase = "selection" {
+        EditorTool := name
+        EditorColorIdx := 1
+        ScreenToolbarResult := "editor"
+        return
+    }
+    EditorTool := name
+    EditorToolbarRefresh()
+}
+
+; 输出按钮：选区阶段 = 写结果给选区调度；编辑阶段 = 转发编辑器动作
+ToolbarOutputClick(action, *) {
+    global ToolbarPhase, ScreenToolbarResult
+    if ToolbarPhase = "selection" {
+        ScreenToolbarResult := action
+        return
+    }
+    switch action {
+        case "save": EditorSave()
+        case "pin": EditorPin()
+        case "copy": EditorCopy()
+    }
 }
 
 ; ------------------------------------------------------------------
@@ -650,16 +739,7 @@ EditorToolbarRefresh() {
         RingRefresh(f, i = EditorPenWidthIdx)
 }
 
-; ------------------------------------------------------------------
-; 工具栏按钮回调
-; ------------------------------------------------------------------
-EditorSetTool(tool, *) {
-    global EditorTool
-    ; 切工具仅切换工具类型，颜色与线宽为所有工具共享，保持不变
-    EditorTool := tool
-    EditorToolbarRefresh()
-}
-
+; 工具栏按钮回调（工具切替由 ToolbarToolClick 统一分发，编辑阶段在此标注）
 EditorSetColor(idx, *) {
     global EditorColorIdx
     EditorColorIdx := idx

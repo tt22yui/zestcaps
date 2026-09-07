@@ -140,14 +140,16 @@ UI_ACCENT          := "5B8BFF"
 UI_ACCENT_WASH     := "1F2A44"   ; 选中工具背景：低饱和深靛墨，暗底上温和凸显（精制选中态）
 UI_ACCENT_TEXT     := "AEC6FF"   ; 选中工具文字：亮靛，在靛墨底上清晰可读的精致强调
 ; ---- 工具栏样式（深色主题；多数色直接引用设计语言 token，颜色为 6 位十六进制 RGB 字符串）----
-EDIT_TB_BG          := UI_BG             ; 工具栏背景色
+; 深浅对比优化：工具栏面板保持最深冷灰（UIBG），在浅色/深色截图上都自带面板承托；
+; 重点提升「面板内部」元素对比——文字提纯白、分隔线/色块外框提亮，浅背景下深色工具栏内结构更醒目
+EDIT_TB_BG          := UI_BG             ; 工具栏背景色（最深板底）
 EDIT_TB_BTN_BG      := UI_SURFACE        ; 按钮默认背景色
 EDIT_TB_BTN_HOVER   := UI_SURFACE_HOVER  ; 按钮悬停背景色
-EDIT_TB_BTN_SEL     := UI_ACCENT_WASH     ; 按钮选中背景色（靛蓝墨，精制选中态——见 ToolbarUI.Apply）
-EDIT_TB_BTN_SEL_TEXT := UI_ACCENT_TEXT    ; 按钮选中文字色（亮靛）
-EDIT_TB_BTN_TEXT    := UI_TEXT           ; 按钮文字颜色（亮）
-EDIT_TB_SEP         := UI_BORDER         ; 分组分隔线颜色
-EDIT_TB_RING        := UI_BORDER         ; 色块外框默认颜色
+EDIT_TB_BTN_SEL     := "243A63"          ; 按钮选中背景色（靛蓝墨，略提亮——浅背景下选中格更易辨，精制选中态见 ToolbarUI.Apply）
+EDIT_TB_BTN_SEL_TEXT := "D3E2FF"         ; 按钮选中文字色（亮靛，更高亮，浅背景下选中态更醒目）
+EDIT_TB_BTN_TEXT    := "FFFFFF"          ; 按钮文字颜色（纯白，与深板对比最足）
+EDIT_TB_SEP         := "464C59"          ; 分组分隔线颜色（提亮，深面板内分组结构更清晰）
+EDIT_TB_RING        := "4A515E"          ; 色块外框默认颜色（提亮，深面板内色块/图标边界更分明）
 EDIT_TB_RING_SEL    := "FFFFFF"          ; 色块外框选中颜色（白色高亮，区分选中填色）
 PIN_MAX_RATIO       := 0.9                                         ; 钉屏图片最大占屏幕边长比例（等比缩放，防止超屏）
 ; ==================================================================

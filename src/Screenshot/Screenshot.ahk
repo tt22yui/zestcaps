@@ -40,7 +40,6 @@ global ScreenshotSelOverlays := 0   ; 选区确认后保留的覆盖层（{mask,
 global ScreenshotAdjustCtx := 0     ; 选区微调阶段上下文（{region, borders, selGui, maskGui, mx/my/mw/mh, state, toolbar, drag}），消息钩子/定时器共享
 global ScreenshotSaveFilename := "" ; 选区保存确认的保存路径（SelectRegion 内确认后交外层落盘；取消保存不设置）
 global ScreenshotSaveBitmap := 0    ; 选区保存确认时已定格的截图位图（SelectRegion 内先抓图再弹框，交外层落盘并释放；取消保存不设置）
-global SelToolbarW := 0, SelToolbarH := 0  ; 选区动作工具栏尺寸缓存（创建时获取一次，跟随定位时复用，避免每帧 WinGetPos）
 GdipToken := Gdip_Startup()
 if !GdipToken {
     MsgBox "GDI+ 初始化失败", "错误", "IconX"
@@ -317,9 +316,17 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
     ; 超时截止点：按 F1 起算，超时未完成则自动取消并恢复屏幕（防止蒙版卡住无法操作）
     deadline := A_TickCount + SCREENSHOT_TIMEOUT_MS
 
-    ; 可变状态对象（供热键与定时器闭包共享；action/tool 由工具栏动作写入）
+    ; 重置工具栏单一真源与结果通道：防止上一会话的工具栏选中态/阶段残留误判
+    ; （EditorTool 一空 → 编辑无预选工具进入，与「仅点窗口」快速截图行为一致）
+    global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
+    EditorTool := ""
+    EditorColorIdx := 1
+    ToolbarPhase := "selection"
+    ScreenToolbarResult := ""
+
+    ; 可变状态对象（供热键与定时器闭包共享；动作结果走全局 ScreenToolbarResult）
     state := { canceled: false, confirmed: false, isDragging: false, dragStartX: 0, dragStartY: 0, hoverX: 0, hoverY: 0
-        , action: "", tool: "", colorIdx: 0, selTb: 0, toolBtns: Map(), region: region }
+        , region: region }
 
     ; 覆盖层（Common\Overlay.ahk 共享组件，编辑器/钉屏接管复用）：
     ;   全屏灰度蒙版（单窗口挖洞：选区处透明露出下层，其余区域灰色半透明并拦截点击）
@@ -425,7 +432,6 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
         action := "editor"
         if state.isDragging {
             toolbar := SelToolbarCreate(state, region)
-            state.selTb := toolbar
             while true {
                 action := SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar)
                 if action = "cancel"
@@ -446,7 +452,7 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
                 if ScreenshotSaveFilename != ""
                     break  ; 保存成功，返回 "save" 由外层落盘
                 ; 取消保存：重置动作与取消标志并顺延超时截止点，继续选区微调（可再调整/换动作/再保存）
-                state.action := ""
+                ScreenToolbarResult := ""
                 state.canceled := false
                 deadline := A_TickCount + SCREENSHOT_TIMEOUT_MS
             }
@@ -459,8 +465,8 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
         EscUnregister()
         state.confirmed := true
         ScreenshotSelOverlays := {mask: maskOv, borders: borders, selGui: selGui, toolbar: toolbar}
-        initialTool := state.tool      ; 点击标注工具时的预选工具（编辑器初始工具）
-        initialColor := state.colorIdx ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
+        initialTool := EditorTool      ; 点击标注工具时的预选工具（编辑器初始工具，单一真源）
+        initialColor := EditorColorIdx ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
         return action
     } finally {
         if hoverFunc
@@ -474,10 +480,11 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
 }
 
 ; 底层销毁覆盖层资源（幂等，可安全重复调用）
-; 蒙版/边框可能已被后续流程接管（传 0 跳过），拦截层与工具栏始终销毁
-_DestroyOverlays(maskOv, borders, selGui, toolbar := 0) {
+; 蒙版/边框可能已被后续流程接管（传 0 跳过），拦截层始终销毁；
+; keepToolbar=true：选区工具栏交给编辑器接管（跨阶段持久，不销毁、不清 ToolbarHoverActive）
+_DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
     global ScreenshotMaskHwnds, ScreenshotSelHwnd, ScreenshotBorderHwnds, ScreenshotEscCancel
-    global ToolbarHoverActive
+    global ToolbarHoverActive, EditorToolbar
     try Hotkey "*RButton", "Off"
     if ScreenshotEscCancel {
         ScreenshotEscCancel := 0
@@ -487,12 +494,14 @@ _DestroyOverlays(maskOv, borders, selGui, toolbar := 0) {
     if selGui
         try selGui.Destroy()
     MaskOverlayDestroy(maskOv)
-    if toolbar {
+    if toolbar && !keepToolbar {
         ; 工具栏销毁后悬停分发不再转发到其状态实例（防止 ToolbarHoverActive 悬空引用）
         if IsObject(toolbar.HoverState) && ToolbarHoverActive = toolbar.HoverState
             ToolbarHoverActive := 0
         try toolbar.HoverState.ClearTransient()  ; 先取消渐变/清理暂存，避免 Map 残存控件引用
         try toolbar.Destroy()
+        if toolbar = EditorToolbar
+            EditorToolbar := 0  ; 选区路径销毁 row1 时同步清全局，防残留非零引用误判下一会话 promote
     }
     ScreenshotMaskHwnds := []
     ScreenshotSelHwnd := 0
@@ -501,14 +510,15 @@ _DestroyOverlays(maskOv, borders, selGui, toolbar := 0) {
 
 ; 销毁遗留的选区覆盖层（编辑器环境就绪后由 ShowEditor 回调 / 独立输出动作后调用；异常时兜底，幂等）
 ; keepMask / keepBorders：蒙版/边框被后续流程接管时保留（编辑器就地升级复用蒙版+边框、钉屏接管边框），
+; keepToolbar：选区工具栏被编辑器接管（跨阶段持久）时保留，其所有权移交 EditorCleanup 统一销毁
 ; 其余情况默认全部销毁，避免覆盖层残留卡屏
-FinishSelectionOverlays(keepMask := false, keepBorders := false) {
+FinishSelectionOverlays(keepMask := false, keepBorders := false, keepToolbar := false) {
     global ScreenshotSelOverlays
     if !ScreenshotSelOverlays
         return
     ovs := ScreenshotSelOverlays
     ScreenshotSelOverlays := 0
-    _DestroyOverlays(keepMask ? 0 : ovs.mask, keepBorders ? 0 : ovs.borders, ovs.selGui, ovs.toolbar)
+    _DestroyOverlays(keepMask ? 0 : ovs.mask, keepBorders ? 0 : ovs.borders, ovs.selGui, ovs.toolbar, keepToolbar)
 }
 
 ; 悬停更新回调
@@ -549,7 +559,7 @@ _DragUpdate(state, region, borders, selGui, maskOv, selLast) {
 ;  - 选区外侧边框/四角左键拖动：调整选区大小（保持 MIN_SEL_SIZE 最小宽高）
 ;  - 选区动作工具栏（标注工具 + 保存/钉屏/复制）：点击即确认并返回对应动作；
 ;    标注工具（arrow/rect/ellipse/mosaic）→ 自动选中第 1 色（红色）并返回 "editor"
-;    （state.tool 记初始工具、state.colorIdx 记初始颜色，编辑器打开时同步该状态，无需再点颜色）；
+;    （EditorTool 记初始工具、EditorColorIdx 记初始颜色，编辑器打开时同步该状态，无需再点颜色）；
 ;    保存/钉屏/复制 → 对应动作；取消由 Esc / 右键 / 超时承担
 ; 返回值："editor"|"copy"|"save"|"pin"（工具栏动作），"cancel"（取消）
 ; ------------------------------------------------------------------
@@ -566,15 +576,15 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
     OnMessage(0x202, AdjustLButtonUp)
     OnMessage(0x203, AdjustLButtonDblClk)
     try {
-        ; 等待工具栏动作或取消（动作由工具栏按钮回调写入 state.action）
-        while !state.canceled && state.action = "" {
+        ; 等待工具栏动作或取消（动作由工具栏按钮回调写入全局 ScreenToolbarResult）
+        while !state.canceled && ScreenToolbarResult = "" {
             if A_TickCount > deadline {
                 state.canceled := true  ; 超时未确认，自动取消
                 break
             }
             Sleep 10
         }
-        return state.canceled ? "cancel" : state.action
+        return state.canceled ? "cancel" : ScreenToolbarResult
     } finally {
         OnMessage(0x201, AdjustLButtonDown, 0)
         OnMessage(0x200, AdjustMouseMove, 0)
@@ -591,7 +601,7 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
 ; 此处只需命中选区内（hit="move"）即触发「复制并关闭截图」（与工具栏「📋 复制」按钮一致）；
 ; 单击仍由 0x201 走平移（双击第一次按下短暂启动平移、松开即结束，鼠标位移很小，选区不位移）
 AdjustLButtonDblClk(wParam, lParam, msg, hwnd) {
-    global ScreenshotAdjustCtx
+    global ScreenshotAdjustCtx, ScreenToolbarResult
     ctx := ScreenshotAdjustCtx
     if !ctx || ctx.drag || ctx.state.canceled || ctx.state.confirmed
         return
@@ -602,13 +612,13 @@ AdjustLButtonDblClk(wParam, lParam, msg, hwnd) {
     ctx.region.GetRegionRect(&l, &t, &w, &h)
     hit := _AdjustHitTest(mx, my, l, t, l + w, t + h)
     if (hit = "move")
-        ctx.state.action := "copy"
+        ScreenToolbarResult := "copy"
 }
 
 ; 左键按下：判定点击命中区（选区内部=平移 / 外侧边框带=改大小），并启动对应拖动；
 ; 选区外空白点击不响应（动作统一由工具栏提供）
 AdjustLButtonDown(wParam, lParam, msg, hwnd) {
-    global ScreenshotAdjustCtx
+    global ScreenshotAdjustCtx, ScreenToolbarResult
     ctx := ScreenshotAdjustCtx
     if !ctx || ctx.drag || ctx.state.canceled || ctx.state.confirmed
         return
@@ -623,7 +633,7 @@ AdjustLButtonDown(wParam, lParam, msg, hwnd) {
     ; 双击选区内部 → 直接复制到剪贴板并关闭截图（与工具栏「📋 复制」按钮一致），不进入平移；
     ; 单击仍平移（双击的第一次按下会短暂启动平移、松开即结束，鼠标位移很小，选区不位移）
     if (hit = "move" && _IsSelectionDoubleClick(mx, my)) {
-        ctx.state.action := "copy"
+        ScreenToolbarResult := "copy"
         return
     }
     mode := SubStr(hit, 1, 4)                  ; "move" 或 "resi"（resize）
@@ -763,87 +773,41 @@ _IsSelectionDoubleClick(mx, my) {
 }
 
 ; ------------------------------------------------------------------
-; 选区动作工具栏：标注工具 + 保存 / 钉屏 / 复制（与编辑窗工具栏同风格）
-; 拖出矩形后展示在选区下方并跟随选区；点击即写入 state.action / state.tool / state.colorIdx
+; 选区动作工具栏：标注工具 + 保存 / 钉屏 / 复制（与编辑工具栏共用同一行 row1，跨阶段持久）
+; 拖出矩形后展示在选区下方并跟随选区；点击动作写入全局 ScreenToolbarResult
 ; ------------------------------------------------------------------
 
-; 创建动作工具栏并定位到选区下方（视觉风格与编辑窗工具栏一致，复用其配色常量）
-; 标注工具按钮直接展示（矩形/箭头/椭圆/马赛克，顺序与编辑窗一致），点击后自动选中第 1 色（红色）
-; 并直接进入编辑窗（无需再点颜色，工具与颜色状态同步显示）；
-; 保存/钉屏/复制 直接输出后关闭截图（复制最右，与编辑窗工具栏保持一致）；退出由 Esc / 右键承担
+; 创建选区动作工具栏并定位到选区下方（复用编辑 row1 的构建 ScreenToolbarCreateRow1；选中态与
+; 点击行为由全局 ToolbarPhase="selection" 驱动：工具 → 选工具 + 自动选第 1 色 + 进入编辑）
+; 保存/钉屏/复制 直接输出后关闭截图（复制最右）；退出由 Esc / 右键承担
 SelToolbarCreate(state, region) {
-    global SelToolbarW, SelToolbarH
-    global ToolbarHoverActive
-    global EDIT_TB_BG, EDIT_TB_SEP
-    tb := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
-    tb.BackColor := EDIT_TB_BG
-    tb.SetFont("s11", "Microsoft YaHei")
-    ; DPI 缩放：字体 s11 由 AHK 按 DPI 自动放大，控件尺寸需手动等比放大（ToolbarDpi）。
-    ; 未 Show 的窗口无有效 DPI，先临时显示到鼠标位置读取所在显示器 DPI，再按缩放因子建控件
-    MouseGetPos &dpiX, &dpiY
-    tb.Show("NA x" dpiX " y" dpiY " w10 h10")
-    SetToolbarDpiScale(tb.Hwnd)
-    tb.MarginX := ToolbarDpi(6)
-    tb.MarginY := ToolbarDpi(5)
-    ; 通用扁平按钮悬停状态（与编辑窗工具栏共用同一套窗口级鼠标处理）
-    tb.HoverState := ToolbarHoverState()
-    ToolbarHoverActive := tb.HoverState
-    tb.HoverState.selFn := SelIsToolSelected.Bind(state)  ; 仅工具按钮参与选中态
-    ; 工具按钮（风格同编辑窗工具栏）；.Bind 捕获动作/state，避免闭包引用循环变量
-    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克），悬停提示给中文工具名
-    tools := [["rect", "▭", "矩形"], ["arrow", "→", "箭头"], ["ellipse", "◯", "椭圆"], ["mosaic", "▦", "马赛克"]]
-    for t in tools {
-        c := tb.HoverState.AddIcon(tb, t[2], "Segoe UI Symbol", SelToolbarAction.Bind(t[1], state), t[3])
-        state.toolBtns[t[1]] := c  ; 记录工具按钮，刷新选中态用
-    }
-    ToolbarSeparator(tb)
-    ; 输出按钮：保存 / 钉屏 / 复制（复制最右：复制后关闭截图，与编辑窗工具栏保持一致）
-    ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制）
-    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", SelToolbarAction.Bind("save", state), "保存")
-    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", SelToolbarAction.Bind("pin", state), "钉屏")  ; 实心图钉 PinnedFill
-    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", SelToolbarAction.Bind("copy", state), "复制")
-    ; 先 AutoSize 拿到实际尺寸（缓存，跟随定位时复用，避免每帧 WinGetPos），
-    ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用），最后摆到选区下方
-    tb.Show("NA AutoSize")
-    WinGetPos &tx, &ty, &tw, &th, "ahk_id " tb.Hwnd
-    SelToolbarW := tw, SelToolbarH := th
-    tb.HoverState.CacheRects()
+    global ToolbarPhase
+    tb := ScreenToolbarCreateRow1(0)  ; 幂等构建 row1（选区 DPI：内部临时 Show 读鼠标所在屏）
+    ToolbarPhase := "selection"
     SelToolbarsReposition(tb, region)
+    tb.Show("NA")  ; 已在最终位置，直接显示，避免从默认位置跳变闪烁
     ToolbarFadeIn(tb.Hwnd)  ; 淡入出现（约 130ms），避免工具栏"硬出现"
     return tb
 }
 
 ; 工具栏整体定位：置于选区正下方居中；下方放不下则移到选区上方；贴近屏幕边缘时钳制在所在显示器工作区内
 SelToolbarsReposition(toolbar, region) {
-    global SelToolbarW, SelToolbarH
-    if !WinExist("ahk_id " toolbar.Hwnd)
+    global EditorToolbarW, EditorToolbarH
+    ; 门卫只要求持有有效工具栏实例：Move/GetPos 均走 AHK 缓存，隐藏或离屏窗口同样可定位（不依赖可见性）
+    if !IsObject(toolbar)
         return
-    region.GetRegionRect(&x, &y, &w, &h)
-    ; 交给公共定位（ToolbarUI.ahk）：选区矩形为锚点，选区中心所在显示器工作区为边界
-    ToolbarPlaceUnder([{hb: toolbar, w: SelToolbarW, h: SelToolbarH}], {l: x, t: y, r: x + w, b: y + h})
-}
-
-; 工具按钮选中判断（悬停系统选中态回调用；输出按钮等非工具按钮恒 false）
-SelIsToolSelected(state, ctrl) {
-    for name, c in state.toolBtns
-        if (c = ctrl)
-            return name = state.tool
-    return false
-}
-
-; 工具栏按钮回调：
-;   标注工具 → 记录预选工具并自动选中第 1 色（红色），隐藏工具栏后直接进入编辑模式（"editor"）；
-;              编辑器打开时同步该工具与颜色状态，立即可标注（无需再点颜色）
-;   保存/钉屏/复制 → 写入动作由 SelectRegionToCapture 分发；退出由 Esc / 右键承担
-SelToolbarAction(action, state, *) {
-    if (action = "arrow" || action = "rect" || action = "ellipse" || action = "mosaic") {
-        state.tool := action
-        state.colorIdx := 1  ; 自动选中第 1 色（红色），编辑器打开时同步该状态
-        if state.selTb
-            state.selTb.Hide()  ; 隐藏主工具栏（避免截图阶段残留），进入编辑模式
-        action := "editor"
+    ; DPI 一致性：region 由截图线程（per-monitor aware）产出物理像素坐标；
+    ; 定位（MonitorGetWorkArea）与移动（Move）若在 unaware 默认线程计算会与物理像素
+    ; 单位错配，Windows 显示缩放 >100%（如 125/150%）下工具栏会整体偏右下。
+    ; 故定位整体包在 per-monitor aware 上下文内，region/工作区/坐标系全为物理一致
+    prevDpi := DllCall("SetThreadDpiAwarenessContext", "Ptr", -3, "Ptr")
+    try {
+        region.GetRegionRect(&x, &y, &w, &h)
+        ; 交给公共定位（ToolbarUI.ahk）：选区矩形为锚点，选区中心所在显示器工作区为边界
+        ToolbarPlaceUnder([{hb: toolbar, w: EditorToolbarW, h: EditorToolbarH}], {l: x, t: y, r: x + w, b: y + h})
+    } finally {
+        DllCall("SetThreadDpiAwarenessContext", "Ptr", prevDpi, "Ptr")
     }
-    state.action := action
 }
 
 ; ------------------------------------------------------------------
@@ -931,11 +895,12 @@ SelectRegionToCapture() {
                 ; 编辑器打开时同步该状态，立即可标注；点击窗口路径（未选工具）为空/0 → 编辑器无工具进入，
                 ; 左键拖动可移动图片，点击工具栏工具后自动选中第 1 色直接绘制；
                 ; 蒙版/边框就地升级给编辑器（洞切换到编辑窗、边框跟随编辑窗），不销毁重建；
-                ; 编辑器环境（编辑窗首帧）就绪后由 leftoverCleanup 销毁遗留的拦截层与选区工具栏，消除整屏明暗跳变
+                ; 选区工具栏由编辑器接管（row1 跨阶段持久，进编辑只补行2）；编辑器环境（编辑窗首帧）
+                ; 就绪后由 leftoverCleanup 销毁遗留的拦截层（keepToolbar 保留工具栏），消除整屏明暗跳变
                 ovs := ScreenshotSelOverlays
                 inherited := ovs ? {mask: ovs.mask, borders: ovs.borders} : 0
                 try {
-                    result := ShowEditor(pBitmap, region, FinishSelectionOverlays.Bind(true, true), initialTool, initialColor, inherited)
+                    result := ShowEditor(pBitmap, region, FinishSelectionOverlays.Bind(true, true, true), initialTool, initialColor, inherited)
                 } catch as e {
                     FinishSelectionOverlays()  ; 编辑器初始化异常：兜底销毁遗留覆盖层，避免全屏蒙版卡屏
                     throw
