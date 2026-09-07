@@ -610,7 +610,7 @@ ScreenToolbarCreateRow2() {
     EditorColorToolbar.BackColor := EDIT_TB_BG
     EditorColorToolbar.SetFont("s11", "Microsoft YaHei")
     ctb := EditorColorToolbar
-    ToolbarSeparator(ctb)
+    ; 色块组直接从面板最左开始（无前导竖线），保持与下方工具行(row1)的紧凑对齐
     for i, color in EDIT_COLORS {
         pair := SwatchCreate(ctb, color, EditorSetColor.Bind(i))
         EditorSwatchFrames.Push(pair[1])
@@ -649,14 +649,85 @@ ShowToolbarRows() {
         ToolbarFadeIn(EditorColorToolbar.Hwnd)
 }
 
+; ------------------------------------------------------------------
+; 选区 → 编辑「完整过渡动画」：row1 保持不透明、平滑移动到编辑窗锚点第一行（不重淡入，
+; 消除「重淡入闪白」）；row2 从 row1 下缘向下展开 + 淡入，衔接两种模式更丝滑
+; ------------------------------------------------------------------
+ShowToolbarRowsAnimated() {
+    global EditorToolbar, EditorToolbarW, EditorToolbarH
+    global EditorColorToolbar, EditorColorToolbarW, EditorColorToolbarH
+    global EditorHwnd, EditorWinW, EditorWinH
+    if !EditorToolbar || !IsObject(EditorColorToolbar)
+        return
+    ; 起点：row1 当前坐标（选区下方；编辑窗覆盖选区后的原位）
+    EditorToolbar.GetPos(&sx, &sy)
+    ; 用编辑窗锚点一次性算出两行最终布局（居中 + 工作区钳制，与 EditorRepositionToolbar 同法）
+    WinGetPos &ex, &ey, , , "ahk_id " EditorHwnd
+    rows := [{hb: EditorToolbar, w: EditorToolbarW, h: EditorToolbarH}
+        , {hb: EditorColorToolbar, w: EditorColorToolbarW, h: EditorColorToolbarH}]
+    ToolbarPlaceUnder(rows, {l: ex, t: ey, r: ex + EditorWinW, b: ey + EditorWinH})
+    EditorToolbar.GetPos(&fx, &fy)           ; row1 目标（第一行）
+    EditorColorToolbar.GetPos(&cx, &cy)      ; row2 目标（第二行）
+    ; 回滚到动画起点：row1 回原位；row2 紧贴 row1 下缘、先全透明（从贴合处向下展开）
+    EditorToolbar.Move(sx, sy)
+    r2StartY := fy + EditorToolbarH
+    EditorColorToolbar.Move(fx, r2StartY)
+    try WinSetTransparent 0, "ahk_id " EditorColorToolbar.Hwnd
+    ; 显示两行（row1 本就可见，Show 无副作用；row2 首次 Show）
+    EditorToolbar.Show("NA")
+    EditorColorToolbar.Show("NA")
+    _ToolbarTransitionRun({r1: EditorToolbar, r2: EditorColorToolbar
+        , sx: sx, sy: sy, fx: fx, fy: fy
+        , w1: EditorToolbarW, h1: EditorToolbarH, w2: EditorColorToolbarW, h2: EditorColorToolbarH
+        , r2x: fx, r2sy: r2StartY, r2ey: cy, dur: 160})
+}
+
+; ---------------------------------------------------------------
+; 编排过渡动画：10ms 步进，ease-out（Cubic）；row1 平移插值到目标位，row2 展开 + 透明度渐升
+; ---------------------------------------------------------------
+_ToolbarTransitionRun(anim) {
+    anim.elapsed := 0
+    anim.then := A_TickCount
+    anim.tick := _ToolbarTransitionTick.Bind(anim)
+    SetTimer anim.tick, 10
+}
+
+_ToolbarTransitionTick(anim) {
+    ; 窗口可能已中途销毁（用户取消/切换）：安全终止
+    if !WinExist("ahk_id " anim.r1.Hwnd) || !WinExist("ahk_id " anim.r2.Hwnd) {
+        SetTimer anim.tick, 0
+        return
+    }
+    now := A_TickCount
+    anim.elapsed += now - anim.then
+    anim.then := now
+    t := Min(1, anim.elapsed / anim.dur)
+    e := 1 - (1 - t) ** 3            ; easeOutCubic
+    r1x := anim.sx + (anim.fx - anim.sx) * e
+    r1y := anim.sy + (anim.fy - anim.sy) * e
+    r2y := anim.r2sy + (anim.r2ey - anim.r2sy) * e
+    anim.r1.Move(Round(r1x), Round(r1y))
+    anim.r2.Move(anim.r2x, Round(r2y))
+    try WinSetTransparent Round(255 * e), "ahk_id " anim.r2.Hwnd
+    if t >= 1 {
+        try WinSetTransparent "Off", "ahk_id " anim.r2.Hwnd
+        ; 动画落地：同步悬停命中测试的窗口坐标缓存（与 ToolbarPlaceUnder 一致）
+        if IsObject(anim.r1.HoverState)
+            anim.r1.HoverState.SetWindowPos(anim.fx, anim.fy, anim.w1, anim.h1)
+        if IsObject(anim.r2.HoverState)
+            anim.r2.HoverState.SetWindowPos(anim.r2x, anim.r2ey, anim.w2, anim.h2)
+        SetTimer anim.tick, 0
+    }
+}
+
 ; 选区 → 编辑过渡：row1 已在选区阶段持久存在，这里只补行2、切阶段、把锚点从「选区矩形」
-; 重锚到「编辑窗」（编辑窗就位于选区之上，row1 视觉上原样保留不重建，过渡无跳动）
+; 重锚到「编辑窗」并播完整过渡动画（row1 平滑归位 + row2 展开淡入）
 EditorPromoteSelectionToolbar() {
     global EditorHwnd, ToolbarPhase
     SetToolbarDpiScale(EditorHwnd)  ; row2 与编辑窗同屏，复用其 DPI
     ScreenToolbarCreateRow2()
     ToolbarPhase := "editor"
-    ShowToolbarRows()
+    ShowToolbarRowsAnimated()
 }
 
 ; ------------------------------------------------------------------
