@@ -783,26 +783,25 @@ SelToolbarCreate(state, region) {
     MouseGetPos &dpiX, &dpiY
     tb.Show("NA x" dpiX " y" dpiY " w10 h10")
     SetToolbarDpiScale(tb.Hwnd)
-    tb.MarginX := ToolbarDpi(8)
-    tb.MarginY := ToolbarDpi(6)
+    tb.MarginX := ToolbarDpi(6)
+    tb.MarginY := ToolbarDpi(5)
     ; 通用扁平按钮悬停状态（与编辑窗工具栏共用同一套窗口级鼠标处理）
     tb.HoverState := ToolbarHoverState()
     ToolbarHoverActive := tb.HoverState
     tb.HoverState.selFn := SelIsToolSelected.Bind(state)  ; 仅工具按钮参与选中态
     ; 工具按钮（风格同编辑窗工具栏）；.Bind 捕获动作/state，避免闭包引用循环变量
-    ; 标签带 Unicode 图标前缀，一眼识别工具用途（▭矩形 →箭头 ◯椭圆 ▦马赛克）
-    tools := [["rect", "▭ 矩形"], ["arrow", "→ 箭头"], ["ellipse", "◯ 椭圆"], ["mosaic", "▦ 马赛克"]]
+    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克），悬停提示给中文工具名
+    tools := [["rect", "▭", "矩形"], ["arrow", "→", "箭头"], ["ellipse", "◯", "椭圆"], ["mosaic", "▦", "马赛克"]]
     for t in tools {
-        c := tb.HoverState.Add(tb, t[2], SelToolbarAction.Bind(t[1], state))
+        c := tb.HoverState.AddIcon(tb, t[2], "Segoe UI Symbol", SelToolbarAction.Bind(t[1], state), t[3])
         state.toolBtns[t[1]] := c  ; 记录工具按钮，刷新选中态用
     }
     ToolbarSeparator(tb)
     ; 输出按钮：保存 / 钉屏 / 复制（复制最右：复制后关闭截图，与编辑窗工具栏保持一致）
-    ; 图标统一为符号字体字符（与工具按钮同风格，避免 emoji 彩色混排）：⤓保存 ⤒钉屏 ⧉复制
-    ; （⤓=存入 ⤒=置顶 ⧉=拷贝，缺字时系统回退 Segoe UI Symbol 单色渲染）
-    tb.HoverState.Add(tb, "⤓ 保存", SelToolbarAction.Bind("save", state))
-    tb.HoverState.Add(tb, "⤒ 钉屏", SelToolbarAction.Bind("pin", state))
-    tb.HoverState.Add(tb, "⧉ 复制", SelToolbarAction.Bind("copy", state))
+    ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制）
+    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", SelToolbarAction.Bind("save", state), "保存")
+    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", SelToolbarAction.Bind("pin", state), "钉屏")  ; 实心图钉 PinnedFill
+    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", SelToolbarAction.Bind("copy", state), "复制")
     ; 先 AutoSize 拿到实际尺寸（缓存，跟随定位时复用，避免每帧 WinGetPos），
     ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用），最后摆到选区下方
     tb.Show("NA AutoSize")
@@ -820,17 +819,8 @@ SelToolbarsReposition(toolbar, region) {
     if !WinExist("ahk_id " toolbar.Hwnd)
         return
     region.GetRegionRect(&x, &y, &w, &h)
-    MonitorGetWorkArea(MonitorIndexAt(x + w // 2, y + h // 2), &ml, &mt, &mr, &mb)
-    tw := SelToolbarW, th := SelToolbarH
-    cx := Min(Max(x + w // 2, ml + tw // 2), mr - tw // 2)
-    cy := y + h + 8
-    if (cy + th > mb)
-        cy := Max(y - th - 8, mt)  ; 下方放不下则整体移到选区上方
-    px := cx - tw // 2
-    py := Max(cy, mt)
-    toolbar.Move(px, py, tw, th)
-    if IsObject(toolbar.HoverState)
-        toolbar.HoverState.SetWindowPos(px, py, tw, th)  ; 同步悬停命中测试的窗口坐标缓存
+    ; 交给公共定位（ToolbarUI.ahk）：选区矩形为锚点，选区中心所在显示器工作区为边界
+    ToolbarPlaceUnder([{hb: toolbar, w: SelToolbarW, h: SelToolbarH}], {l: x, t: y, r: x + w, b: y + h})
 }
 
 ; 工具按钮选中判断（悬停系统选中态回调用；输出按钮等非工具按钮恒 false）

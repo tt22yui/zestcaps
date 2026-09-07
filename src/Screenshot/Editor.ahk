@@ -148,8 +148,8 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
         if leftoverCleanup
             leftoverCleanup()
 
-        ; 悬浮工具栏：置于编辑窗正下方
-        EditorCreateToolbar(ex + EditorWinW // 2, ey + EditorWinH + 8)
+        ; 悬浮工具栏：置于编辑窗正下方（定位见 EditorRepositionToolbar，以编辑窗为锚点）
+        EditorCreateToolbar()
         EditorToolbarRefresh()
 
         ; 等待用户操作（按钮回调 / Esc 设置 EditorResult）
@@ -470,7 +470,7 @@ EditorLButtonUp(wParam, lParam, msg, hwnd) {
         EditorApplyDrag()  ; 应用最后一帧位置，避免松开瞬间的滞后
         ; 恢复两行工具栏并贴附到编辑窗新位置（蒙版/边框已在拖动中跟随，无需恢复）
         if EditorToolbar {
-            EditorRepositionToolbar(EditorDragAppliedX + EditorWinW // 2, EditorDragAppliedY + EditorWinH + 8)
+            EditorRepositionToolbar()
             EditorToolbar.Show("NA")
         }
         if EditorColorToolbar
@@ -508,7 +508,7 @@ EditorRButtonDown(wParam, lParam, msg, hwnd) {
 ; ------------------------------------------------------------------
 ; 悬浮工具栏（置于编辑窗下方）
 ; ------------------------------------------------------------------
-EditorCreateToolbar(centerX, y) {
+EditorCreateToolbar() {
     global EditorToolbar, EditorToolbarW, EditorToolbarH
     global EditorColorToolbar, EditorColorToolbarW, EditorColorToolbarH
     global EditorToolButtons, EditorToolLabels, EditorColorSwatches, EditorSwatchFrames
@@ -528,10 +528,10 @@ EditorCreateToolbar(centerX, y) {
     EditorPenWidthFrames := []
 
     ; ---- 第一行：工具按钮 + 输出（保存/钉屏/复制），与选区工具栏第一行同结构 ----
-    ; 深色主题面板，微软雅黑字体（按钮统一 26 高：文字按钮/色块/分隔线对齐）
+    ; 深色主题面板，微软雅黑字体（按钮统一 24 高：文字按钮/色块/分隔线对齐）
     EditorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
-    EditorToolbar.MarginX := ToolbarDpi(8)
-    EditorToolbar.MarginY := ToolbarDpi(6)
+    EditorToolbar.MarginX := ToolbarDpi(6)
+    EditorToolbar.MarginY := ToolbarDpi(5)
     EditorToolbar.BackColor := EDIT_TB_BG
     EditorToolbar.SetFont("s11", "Microsoft YaHei")
     tb := EditorToolbar
@@ -541,22 +541,22 @@ EditorCreateToolbar(centerX, y) {
     tb.HoverState.selFn := EditorIsSelectedTool.Bind(EditorToolButtons)  ; 仅工具按钮参与选中态
 
     ; 工具按钮区（PixPin 风格：矩形 / 箭头 / 椭圆 / 马赛克，选中态由 EditorToolbarRefresh 刷新）
-    ; 标签带 Unicode 图标前缀，一眼识别工具用途（▭矩形 →箭头 ◯椭圆 ▦马赛克）
-    ; 注意：必须用 .Bind() 在绑定瞬间捕获循环值 —— AHK v2 闭包读不到 for 循环变量
-    ;       （闭包看到的是循环外未赋值的空值），直接闭包引用会在点击时访问空变量报错
-    tools := [["▭ 矩形", "rect"], ["→ 箭头", "arrow"], ["◯ 椭圆", "ellipse"], ["▦ 马赛克", "mosaic"]]
+    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克），
+    ; 悬停提示给出中文工具名；.Bind 捕获循环值（AHK v2 闭包读不到 for 循环变量）
+    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["▦", "mosaic", "马赛克"]]
     for t in tools {
-        c := tb.HoverState.Add(tb, t[1], EditorSetTool.Bind(t[2]))
+        c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", EditorSetTool.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c
         EditorToolLabels[t[2]] := t[1]
     }
 
     ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右：复制后关闭编辑器，退出由 Esc 承担）
-    ; 图标统一为符号字体字符（与工具按钮同风格，避免 emoji 彩色混排）：⤓保存 ⤒钉屏 ⧉复制
+    ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制），
+    ; 需显式指定图标字体，否则默认正文字体下缺字；悬停提示给出中文动作名
     ToolbarSeparator(tb)
-    tb.HoverState.Add(tb, "⤓ 保存", EditorSave)
-    tb.HoverState.Add(tb, "⤒ 钉屏", EditorPin)
-    tb.HoverState.Add(tb, "⧉ 复制", EditorCopy)
+    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", EditorSave, "保存")
+    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", EditorPin, "钉屏")  ; 实心图钉 PinnedFill
+    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", EditorCopy, "复制")
 
     ; 先 AutoSize 拿到实际尺寸（缓存，拖动定位时复用，避免每帧 WinGetPos），
     ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用）
@@ -567,13 +567,11 @@ EditorCreateToolbar(centerX, y) {
 
     ; ---- 第二行：颜色行（"颜色"标签 + 色块 + 粗细档位 + 清除，与选区颜色行同结构，清除并入此行）----
     EditorColorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
-    EditorColorToolbar.MarginX := ToolbarDpi(8)
-    EditorColorToolbar.MarginY := ToolbarDpi(6)
+    EditorColorToolbar.MarginX := ToolbarDpi(6)
+    EditorColorToolbar.MarginY := ToolbarDpi(5)
     EditorColorToolbar.BackColor := EDIT_TB_BG
     EditorColorToolbar.SetFont("s11", "Microsoft YaHei")
     ctb := EditorColorToolbar
-    ; "颜色"标签带 ● 图标前缀（色块入口），宽度加宽容纳图标+文字（实测 53px，留居中边距）
-    ctb.Add("Text", "x+m w" ToolbarDpi(62) " h" ToolbarDpi(26) " Center 0x200 Background" EDIT_TB_BTN_BG " c" EDIT_TB_BTN_TEXT, "● 颜色")
     ToolbarSeparator(ctb)
     for i, color in EDIT_COLORS {
         pair := SwatchCreate(ctb, color, EditorSetColor.Bind(i))
@@ -589,15 +587,15 @@ EditorCreateToolbar(centerX, y) {
     ; 分隔线 + 清除（ToolbarSeparator 前导留白含 y0，打断色块内块 yp+2 的 y 继承，保证按钮顶端对齐）
     ToolbarSeparator(ctb)
     ctb.HoverState := ToolbarHoverState()  ; 清除按钮走同一套悬停样式（独立实例，经 ToolbarHoverAux 分发）
-    ctb.HoverState.Add(ctb, "✕ 清除", EditorClear)
+    ctb.HoverState.AddIcon(ctb, Chr(0xE74D), "Segoe MDL2 Assets", EditorClear, "清除")  ; MDL2 Delete 清除
     ToolbarHoverAux := ctb.HoverState
     ctb.Show("NA AutoSize")
     WinGetPos &ctx, &cty, &ctw, &cth, "ahk_id " EditorColorToolbar.Hwnd
     EditorColorToolbarW := ctw, EditorColorToolbarH := cth
     ctb.HoverState.CacheRects()
 
-    ; 两行整体定位：置于编辑窗正下方居中
-    EditorRepositionToolbar(centerX, y)
+    ; 两行整体定位：置于编辑窗下方居中（锚点 = 编辑窗）
+    EditorRepositionToolbar()
     ; 两行工具栏淡入出现（约 130ms），避免编辑窗就绪后工具栏"硬出现"
     ToolbarFadeIn(EditorToolbar.Hwnd)
     ToolbarFadeIn(EditorColorToolbar.Hwnd)
@@ -618,36 +616,19 @@ EditorIsSelectedTool(toolButtons, ctrl) {
 }
 
 ; 工具栏定位：置于编辑窗正下方居中（拖动编辑窗时也调用，保持跟随）
-; 两行整体定位（工具行 + 颜色行，与选区两行工具栏同一手法）；下方放不下则整体移到编辑窗上方
-; 尺寸已缓存（EditorToolbarW/H、EditorColorToolbarW/H），边界复用蒙版覆盖范围（全屏并集），避免每帧 WinGetPos/MonitorGetWorkArea 的开销
-EditorRepositionToolbar(centerX, y) {
+; 两行整体定位（工具行 + 颜色行，与选区工具栏同一手法）；交给公共定位（ToolbarUI.ahk），
+; 以编辑窗为锚点矩形，边界用编辑窗中心所在显示器工作区（修复原蒙版全屏并集导致的跨屏/压任务栏）
+EditorRepositionToolbar() {
     global EditorToolbar, EditorToolbarW, EditorToolbarH
     global EditorColorToolbar, EditorColorToolbarW, EditorColorToolbarH
-    global EditorMaskOv
+    global EditorHwnd, EditorWinW, EditorWinH
     if !EditorToolbar
         return
-    tw := EditorToolbarW, th := EditorToolbarH
-    ctw := EditorColorToolbarW, cth := EditorColorToolbarH
-    ml := EditorMaskOv.mx, mt := EditorMaskOv.my
-    mr := ml + EditorMaskOv.mw, mb := mt + EditorMaskOv.mh
-    ; 颜色行固定显示，两行整体计入高度
-    totalH := th + cth + 2
-    cx := Min(Max(centerX, ml + tw // 2), mr - tw // 2)
-    cy := y
-    if (cy + totalH > mb)
-        cy := Max(y - totalH - 8, mt)  ; 下方放不下则整体移到编辑窗上方
-    py := Max(cy, mt)
-    EditorToolbar.Move(cx - tw // 2, py, tw, th)
-    if IsObject(EditorToolbar.HoverState)
-        EditorToolbar.HoverState.SetWindowPos(cx - tw // 2, py, tw, th)  ; 同步悬停命中测试的窗口坐标缓存
-    if EditorColorToolbar {
-        ccx := Min(Max(centerX, ml + ctw // 2), mr - ctw // 2)
-        cpx := ccx - ctw // 2
-        cpy := Max(py + th + 2, mt)
-        EditorColorToolbar.Move(cpx, cpy, ctw, cth)
-        if IsObject(EditorColorToolbar.HoverState)
-            EditorColorToolbar.HoverState.SetWindowPos(cpx, cpy, ctw, cth)  ; 同步悬停命中测试的窗口坐标缓存
-    }
+    WinGetPos &ex, &ey, , , "ahk_id " EditorHwnd
+    rows := [{hb: EditorToolbar, w: EditorToolbarW, h: EditorToolbarH}]
+    if EditorColorToolbar
+        rows.Push({hb: EditorColorToolbar, w: EditorColorToolbarW, h: EditorColorToolbarH})
+    ToolbarPlaceUnder(rows, {l: ex, t: ey, r: ex + EditorWinW, b: ey + EditorWinH})
 }
 
 ; 刷新工具栏选中态：选中的工具按钮高亮，选中的色块/粗细图标外框高亮

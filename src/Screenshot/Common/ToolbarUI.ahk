@@ -35,15 +35,15 @@ SetToolbarDpiScale(hwnd) {
 
 ; ------------------------------------------------------------------
 ; 统一分组分隔线 —— 规整工具栏内「组边界」节奏
-; 前导 4px 透明留白 + 2px 竖分隔线，均与按钮等高(26)：在工具组/输出组/颜色组之间形成
+; 前导 4px 透明留白 + 2px 竖分隔线，均与按钮等高(24)：在工具组/输出组/颜色组之间形成
 ; 清晰的组边界停顿，但又不喧宾夺主。选区工具栏与编辑窗两行共用，保证三处节奏一致。
 ; ------------------------------------------------------------------
 ToolbarSeparator(tb) {
     global EDIT_TB_SEP
     ; 前导透明留白：拉大与上一组的间距，制造分组停顿（Text 默认透明透出工具栏底色）
-    tb.Add("Text", "x+m y0 w" ToolbarDpi(4) " h" ToolbarDpi(26) "", "")
+    tb.Add("Text", "x+m y0 w" ToolbarDpi(4) " h" ToolbarDpi(24) "", "")
     ; 2px 竖分隔线
-    tb.Add("Text", "x+m y0 w" ToolbarDpi(2) " h" ToolbarDpi(26) " Background" EDIT_TB_SEP, "")
+    tb.Add("Text", "x+m y0 w" ToolbarDpi(2) " h" ToolbarDpi(24) " Background" EDIT_TB_SEP, "")
 }
 
 ; ------------------------------------------------------------------
@@ -60,7 +60,7 @@ SwatchMarker(color) {
 ; ------------------------------------------------------------------
 SwatchCreate(tb, color, clickCb) {
     global EDIT_TB_RING
-    size := ToolbarDpi(26)      ; 色块外框尺寸（物理像素按 DPI 缩放）
+    size := ToolbarDpi(24)      ; 色块外框尺寸（物理像素按 DPI 缩放）
     ring := Max(2, ToolbarDpi(2))  ; 外框环宽（最小 2px 保证可见）
     inner := size - 2 * ring    ; 内块尺寸（保证外框环两侧对称）
     rgb := Format("{:06X}", color & 0xFFFFFF)
@@ -105,7 +105,7 @@ RingRefresh(f, selected) {
 ; ------------------------------------------------------------------
 PenWidthIconCreate(tb, dotSize, clickCb) {
     global EDIT_TB_RING, EDIT_TB_BTN_BG, EDIT_TB_BTN_TEXT
-    size := ToolbarDpi(26)      ; 图标外框尺寸（物理像素按 DPI 缩放）
+    size := ToolbarDpi(24)      ; 图标外框尺寸（物理像素按 DPI 缩放）
     ring := Max(2, ToolbarDpi(2))  ; 外框环宽（最小 2px 保证可见）
     inner := size - 2 * ring    ; 内块尺寸（保证外框环两侧对称）
     f := tb.Add("Text", "x+m y0 w" size " h" size " Background" EDIT_TB_RING, "")
@@ -176,14 +176,30 @@ class ToolbarHoverState {
     rects := [] ; 按钮在工具栏客户区坐标缓存（[x,y,w,h]，Show 后定稿）
     wx := 0, wy := 0, ww := 0, wh := 0  ; 工具栏窗口屏幕坐标/尺寸缓存
     selFn := 0  ; 选中判断回调 fn(ctrl) → bool（工具按钮用；输出按钮恒 false）
+    tips := Map()  ; 按钮控件 -> 悬停工具提示文本（空串不显示）
 
-    ; 创建扁平按钮：统一 26 高（与色块/分隔线对齐），文字垂直水平居中，登记到悬停列表
+    ; 创建扁平按钮：统一 24 高（与色块/分隔线对齐），文字垂直水平居中，登记到悬停列表
     ; 宽 74（图标+文字标签实测最宽 71px，留出居中边距不裁切；按 DPI 缩放）
     Add(tb, text, callback) {
         global EDIT_TB_BTN_BG, EDIT_TB_BTN_TEXT
-        c := tb.Add("Text", "x+m w" ToolbarDpi(74) " h" ToolbarDpi(26) " Center 0x200 Background" EDIT_TB_BTN_BG " c" EDIT_TB_BTN_TEXT, text)
+        c := tb.Add("Text", "x+m w" ToolbarDpi(74) " h" ToolbarDpi(24) " Center 0x200 Background" EDIT_TB_BTN_BG " c" EDIT_TB_BTN_TEXT, text)
         c.OnEvent("Click", callback)
         this.btns.Push(c)
+        return c
+    }
+
+    ; 创建图标按钮（纯图标、无文字）：统一 24 高，垂直水平居中，登记到悬停列表。
+    ; 用图标字体渲染字形并收窄宽度（Icon 宽 30）；选中/悬停仍走统一处理（背景+文字色，
+    ; 与文字按钮一致），仅字形与宽度不同。tip 为悬停工具提示（可为空）。字体选择：
+    ; 几何绘图类用 "Segoe UI Symbol"、系统动作类用 "Segoe MDL2 Assets"（图标字体在普通
+    ; 中西文字体下会缺字，故必须显式指定）。字号 s15 与尺寸一样由工具栏 DPI 缩放（等比居中）。
+    AddIcon(tb, glyph, fontFace, callback, tip := "") {
+        global EDIT_TB_BTN_BG, EDIT_TB_BTN_TEXT
+        c := tb.Add("Text", "x+m w" ToolbarDpi(30) " h" ToolbarDpi(24) " Center 0x200 Background" EDIT_TB_BTN_BG " c" EDIT_TB_BTN_TEXT, glyph)
+        c.SetFont("s15", fontFace)
+        c.OnEvent("Click", callback)
+        this.btns.Push(c)
+        this.tips[c] := tip
         return c
     }
 
@@ -199,6 +215,16 @@ class ToolbarHoverState {
     ; 同步工具栏窗口屏幕坐标（Move 后调用，避免每帧 WinGetPos）
     SetWindowPos(x, y, w, h) {
         this.wx := x, this.wy := y, this.ww := w, this.wh := h
+    }
+
+    ; 显示/隐藏按钮悬停工具提示（ToolTip 全局命令，一次只显示一个；仅对注册了非空文本的按钮生效）
+    SetTip(btn) {
+        if this.tips.Has(btn) && this.tips[btn] != ""
+            ToolTip(this.tips[btn])
+    }
+    ClearTip(btn) {
+        if this.tips.Has(btn) && this.tips[btn] != ""
+            ToolTip()
     }
 
     ; 悬停命中刷新（WM_MOUSEMOVE 分发）：命中按钮→高亮；光标离开窗口→复位
@@ -217,6 +243,7 @@ class ToolbarHoverState {
                 old := this.ctrl
                 this.ctrl := 0  ; 先清悬停再刷新，避免误判为仍悬停
                 this.Apply(old, this.IsSelected(old))
+                this.ClearTip(old)
             }
             return
         }
@@ -231,13 +258,17 @@ class ToolbarHoverState {
         }
         if (c = this.ctrl)
             return
-        ; 悬停变化：先记录新按钮，再统一刷新新旧状态（普通/悬停/选中 → 重建位图）
+        ; 悬停变化：先清旧按钮提示并刷新状态，再进新按钮；c 一定 ≠ old（上面已提前返回）
         old := this.ctrl
         this.ctrl := c
-        if old
+        if old {
             this.Apply(old, this.IsSelected(old))
-        if c
+            this.ClearTip(old)
+        }
+        if c {
             this.Apply(c, this.IsSelected(c))
+            this.SetTip(c)
+        }
     }
 
     ; WM_MOUSELEAVE：光标离开工具栏窗口，复位悬停高亮（避免悬停态"粘住"）
@@ -246,6 +277,7 @@ class ToolbarHoverState {
             old := this.ctrl
             this.ctrl := 0
             this.Apply(old, this.IsSelected(old))
+            this.ClearTip(old)
         }
     }
 
@@ -274,6 +306,7 @@ class ToolbarHoverState {
 
     ; 工具栏销毁时清理本实例按钮的渐变/底色暂存，避免 Map 残存控件引用导致内存累积
     ClearTransient() {
+        ToolTip()  ; 兜底清除可能残留的悬停提示（窗口销毁不再触发 WM_MOUSELEAVE）
         for b in this.btns {
             if _HoverEase.Has(b) {
                 SetTimer _HoverEase[b].timer, 0
@@ -350,4 +383,52 @@ _ToolbarFadeTick(fade) {
         return
     }
     try WinSetTransparent fade.alpha, "ahk_id " fade.hwnd
+}
+
+; ------------------------------------------------------------------
+; 悬浮工具栏整体定位（选区动作工具栏 / 编辑窗两行工具栏共用）
+; rows：每行一个元素 {hb: Gui, w, h}（工具栏对象 + AutoSize 缓存尺寸，可多行堆叠）
+; anchor：锚定矩形 {l,t,r,b}（选区矩形或编辑窗矩形，决定居中基准与上下翻转边界）
+; 策略：整体置于锚点下方 gap 处居中；下方放不下则整体翻到锚点上方；每行水平居中钳制在
+;       锚点中心所在显示器的「工作区」内（排除任务栏、多显示器取锚点所在屏）。
+;       边界一律用工作区，修复编辑窗曾用蒙版全屏并集导致的「跨屏 / 压任务栏」缺陷，
+;       与选区工具栏原行为对齐。每行各自独立水平居中 + 工作区钳制，兼容选区单行/
+;       编辑窗两行的差异。行内 HoverState 同步窗口坐标供悬停命中测试使用。
+; ------------------------------------------------------------------
+ToolbarPlaceUnder(rows, anchor) {
+    gap := 8    ; 工具栏与锚点矩形的间距
+    rowGap := 2 ; 行与行之间的间距
+    centerX := (anchor.l + anchor.r) // 2
+    centerY := (anchor.t + anchor.b) // 2
+    ; 锚点中心所在显示器的工作区（本地命中，不依赖 Overlay.ahk 的 MonitorIndexAt，保持组件自足）
+    idx := 1
+    Loop MonitorGetCount() {
+        MonitorGet(A_Index, &ml, &mt, &mr, &mb)
+        if (centerX >= ml && centerX < mr && centerY >= mt && centerY < mb) {
+            idx := A_Index
+            break
+        }
+    }
+    MonitorGetWorkArea(idx, &ml, &mt, &mr, &mb)
+    ; 整体高度 = 各行之和高 + 行间距
+    totalH := 0
+    for r in rows
+        totalH += r.h
+    if rows.Length > 1
+        totalH += rowGap * (rows.Length - 1)
+    ; 垂直：先置于锚点下方，放不下整体翻到锚点上方；再钳制在工作区顶部
+    baseY := anchor.b + gap
+    if (baseY + totalH > mb)
+        baseY := Max(anchor.t - gap - totalH, mt)
+    y := Max(baseY, mt)
+    ; 逐行定位：各自水平居中并钳制在工作区左右缘，垂直依次堆叠
+    for r in rows {
+        cx := Min(Max(centerX, ml + r.w // 2), mr - r.w // 2)
+        px := cx - r.w // 2
+        py := Max(y, mt)
+        r.hb.Move(px, py, r.w, r.h)
+        if IsObject(r.hb.HoverState)
+            r.hb.HoverState.SetWindowPos(px, py, r.w, r.h)  ; 同步悬停命中测试的窗口坐标缓存
+        y += r.h + rowGap
+    }
 }
