@@ -323,8 +323,11 @@ EditorDrawAnnotation(G, ann, s) {
     }
 }
 
-; 箭头：主线 + 两条箭头翼线（翼与主线约 30° 夹角）
+; 箭头：主线 + 两条箭头翼线（翼与主线约 30° 夹角）；首尾用圆形端点，
+; 头部两条翼线与主线在头尖交融成圆头，尾部收成圆头，避免尖角
 EditorDrawArrow(G, pPen, x1, y1, x2, y2, penW) {
+    DllCall("gdiplus\GdipSetPenStartCap", "ptr", pPen, "int", 2)  ; LineCapRound 圆头
+    DllCall("gdiplus\GdipSetPenEndCap", "ptr", pPen, "int", 2)
     Gdip_DrawLine(G, pPen, x1, y1, x2, y2)
     dx := x2 - x1, dy := y2 - y1
     len := Sqrt(dx * dx + dy * dy)
@@ -334,6 +337,14 @@ EditorDrawArrow(G, pPen, x1, y1, x2, y2, penW) {
     al := Max(12, penW * 3)  ; 翼长：与线宽相关，保证可见
     Gdip_DrawLine(G, pPen, x2, y2, x2 - ux * al + uy * al * 0.5, y2 - uy * al - ux * al * 0.5)
     Gdip_DrawLine(G, pPen, x2, y2, x2 - ux * al - uy * al * 0.5, y2 - uy * al + ux * al * 0.5)
+    ; 头尖再叠一个同色实心圆：两条翼线与主线在头尖交融，视觉上进一步圆润
+    argb := Buffer(4)
+    DllCall("gdiplus\GdipGetPenColor", "ptr", pPen, "ptr", argb)
+    c := NumGet(argb, 0, "uint")
+    r := penW * 0.75                    ; 圆润半径（略大于半线宽，使其明显）
+    pBrush := Gdip_BrushCreateSolid(c)
+    Gdip_FillEllipse(G, pBrush, x2 - r, y2 - r, r * 2, r * 2)
+    Gdip_DeleteBrush(pBrush)
 }
 
 ; 马赛克：源区域先压缩（双线性平均），再按最近邻放大回目标区域 → 像素块效果
