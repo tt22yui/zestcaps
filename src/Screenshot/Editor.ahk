@@ -307,9 +307,7 @@ EditorDrawAnnotation(G, ann, s) {
     w := Max(1, ann.penWidth * s)
     switch ann.type {
         case "arrow":
-            pPen := Gdip_CreatePen(ann.color, w)
-            EditorDrawArrow(G, pPen, ann.x1 * s, ann.y1 * s, ann.x2 * s, ann.y2 * s, w)
-            Gdip_DeletePen(pPen)
+            EditorDrawArrow(G, ann.color, ann.x1 * s, ann.y1 * s, ann.x2 * s, ann.y2 * s, w)
         case "rect":
             pPen := Gdip_CreatePen(ann.color, w)
             Gdip_DrawRectangle(G, pPen, Min(ann.x1, ann.x2) * s, Min(ann.y1, ann.y2) * s, Abs(ann.x2 - ann.x1) * s, Abs(ann.y2 - ann.y1) * s)
@@ -323,17 +321,39 @@ EditorDrawAnnotation(G, ann, s) {
     }
 }
 
-; 箭头：主线 + 两条箭头翼线（翼与主线约 30° 夹角）
-EditorDrawArrow(G, pPen, x1, y1, x2, y2, penW) {
-    Gdip_DrawLine(G, pPen, x1, y1, x2, y2)
+; 卡通风筝形箭头（偏卡通）：头部圆润宽三角 + 杆身从头部向拖动起点平滑收窄成"屁股尖"，
+; 贯穿整条箭头线。实心四顶点：头尖 → 上肩 → 尾尖(拖动起点 x1) → 下肩；
+; 尖端叠实心圆融合成圆润头。尺寸随线宽并随 s 缩放，保持屏上观感一致。
+EditorDrawArrow(G, color, x1, y1, x2, y2, penW) {
     dx := x2 - x1, dy := y2 - y1
     len := Sqrt(dx * dx + dy * dy)
-    if (len < 1)
+    if (len < 4)
         return
-    ux := dx / len, uy := dy / len
-    al := Max(12, penW * 3)  ; 翼长：与线宽相关，保证可见
-    Gdip_DrawLine(G, pPen, x2, y2, x2 - ux * al + uy * al * 0.5, y2 - uy * al - ux * al * 0.5)
-    Gdip_DrawLine(G, pPen, x2, y2, x2 - ux * al - uy * al * 0.5, y2 - uy * al + ux * al * 0.5)
+    ux := dx / len, uy := dy / len          ; 单位方向向量
+    headLen := Max(14, penW * 4)            ; 头部轴向长
+    if (headLen > len * 0.5)                ; 过短箭头钳制头长，保留可辨识杆身
+        headLen := len * 0.5
+    headWide := Max(12, penW * 4)           ; 头部底边半宽
+    if (headWide > headLen)                 ; 避免头部过扁，半宽 ≤ 头长
+        headWide := headLen
+    ; 头肩位置 = 头尖向后退 headLen；尾尖 = 拖动起点 (x1,y1)
+    mx := x2 - ux * headLen
+    my := y2 - uy * headLen
+    ax := mx + uy * headWide, ay := my - ux * headWide   ; 上肩
+    bx := mx - uy * headWide, by := my + ux * headWide   ; 下肩
+    ; 实心四顶点（头尖 → 上肩 → 尾尖 → 下肩）。直填 gdiplus\GdipFillPolygon：
+    ; 手动构造 4 顶点 PointF 缓冲——库层 Gdip_FillPolygon 按字符串坐标 NumPut，
+    ; v2 严格类型拒绝 String，故绕开
+    tri := Buffer(8 * 4)
+    NumPut("float", x2, tri, 0),  NumPut("float", y2, tri, 4)                              ; 头尖
+    NumPut("float", ax, tri, 8),  NumPut("float", ay, tri, 12)                              ; 上肩
+    NumPut("float", x1, tri, 16), NumPut("float", y1, tri, 20)                              ; 尾尖(杆身起始)
+    NumPut("float", bx, tri, 24), NumPut("float", by, tri, 28)                              ; 下肩
+    pBrush := Gdip_BrushCreateSolid(color)
+    DllCall("gdiplus\GdipFillPolygon", "ptr", G, "ptr", pBrush, "ptr", tri, "int", 4, "int", 0)
+    rt := headWide * 0.5                    ; 尖端圆头半径（与头尖融合成圆润头）
+    Gdip_FillEllipse(G, pBrush, x2 - rt, y2 - rt, rt * 2, rt * 2)
+    Gdip_DeleteBrush(pBrush)
 }
 
 ; 马赛克：源区域先压缩（双线性平均），再按最近邻放大回目标区域 → 像素块效果
