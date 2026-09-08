@@ -60,6 +60,7 @@ class EditorAnnotation {
     x1 := 0, y1 := 0, x2 := 0, y2 := 0
     color := 0
     penWidth := 0  ; 线宽（图片空间像素，创建时快照当前档位）
+    points := []  ; 画笔折线点（每项 {x,y}，图片空间坐标）；仅 type="brush" 使用
     mosaic := 0  ; 马赛克压缩小图缓存（GDI+ bitmap，重绘复用，避免反复采样原图）
     mosaicRw := 0, mosaicRh := 0  ; 缓存对应的裁剪后区域尺寸（图片空间）；区域变化时重建缓存
 }
@@ -320,6 +321,8 @@ EditorDrawAnnotation(G, ann, s) {
             Gdip_DeletePen(pPen)
         case "mosaic":
             EditorDrawMosaic(G, ann, s)
+        case "brush":
+            EditorDrawBrush(G, ann, s)
     }
 }
 
@@ -345,6 +348,42 @@ EditorDrawArrow(G, pPen, x1, y1, x2, y2, penW) {
     pBrush := Gdip_BrushCreateSolid(c)
     Gdip_FillEllipse(G, pBrush, x2 - r, y2 - r, r * 2, r * 2)
     Gdip_DeleteBrush(pBrush)
+}
+
+; 画笔：圆角折线（逐点连线，线帽 Round + 线连接 Round，平滑无尖角）
+; 点坐标为图片空间，按 s 缩放输出；单点/空点不发散（过小已由 LButtonUp 拦截）
+; 注：逐段 Gdip_DrawLine（Gdip_DrawLines 封装在此 AHK 版本有兼容问题）
+EditorDrawBrush(G, ann, s) {
+    if !ann.points || ann.points.Length < 2
+        return
+    pPen := Gdip_CreatePen(ann.color, Max(1, ann.penWidth * s))
+    DllCall("gdiplus\GdipSetPenStartCap", "ptr", pPen, "int", 2)  ; LineCapRound 圆头
+    DllCall("gdiplus\GdipSetPenEndCap",   "ptr", pPen, "int", 2)  ; LineCapRound 圆头
+    DllCall("gdiplus\GdipSetPenLineJoin", "ptr", pPen, "int", 2)  ; LineJoinRound 圆角连接
+    prev := ann.points[1]
+    loop ann.points.Length - 1 {
+        cur := ann.points[A_Index + 1]
+        Gdip_DrawLine(G, pPen, prev.x * s, prev.y * s, cur.x * s, cur.y * s)
+        prev := cur
+    }
+    Gdip_DeletePen(pPen)
+}
+
+; 画笔抽稀采集：距上一采样点（显示空间距离）≥ 阈值才追加入点，
+; 长笔画保持平滑的同时限制点总量，避免每帧重画 O(n) 时点数过大
+EditorBrushAppendPoint(pend, x, y) {
+    global EDIT_BRUSH_MIN_DIST, EditorScale
+    if !pend.points
+        return
+    if !pend.points.Length {
+        pend.points.Push({x: x, y: y})
+        return
+    }
+    last := pend.points[-1]                       ; 数组负索引取末元素
+    dx := (x - last.x) * EditorScale
+    dy := (y - last.y) * EditorScale
+    if (dx * dx + dy * dy >= EDIT_BRUSH_MIN_DIST * EDIT_BRUSH_MIN_DIST)
+        pend.points.Push({x: x, y: y})
 }
 
 ; 马赛克：源区域先压缩（双线性平均），再按最近邻放大回目标区域 → 像素块效果
@@ -427,11 +466,15 @@ EditorLButtonDown(wParam, lParam, msg, hwnd) {
     EditorPending.y1 := (lParam << 32 >> 48) / EditorScale
     EditorPending.x2 := EditorPending.x1
     EditorPending.y2 := EditorPending.y1
+    if EditorTool = "brush" {          ; 画笔：初始化点集，首点入数组
+        EditorPending.points := []
+        EditorBrushAppendPoint(EditorPending, EditorPending.x1, EditorPending.y1)
+    }
     DllCall("SetCapture", "Ptr", hwnd)
 }
 
 EditorMouseMove(wParam, lParam, msg, hwnd) {
-    global EditorHwnd, EditorPending, EditorScale
+    global EditorHwnd, EditorPending, EditorScale, EditorTool
     global EditorDragging, EditorDragWinX, EditorDragWinY, EditorDragMouseX, EditorDragMouseY
     global EditorDragTargetX, EditorDragTargetY
     global EditorWinW, EditorWinH
@@ -448,6 +491,8 @@ EditorMouseMove(wParam, lParam, msg, hwnd) {
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
     EditorPending.y2 := (lParam << 32 >> 48) / EditorScale
+    if EditorTool = "brush"  ; 画笔：追加当前点为采样点（按抽稀阈值决定是否记录）
+        EditorBrushAppendPoint(EditorPending, EditorPending.x2, EditorPending.y2)
     EditorRender()
 }
 
@@ -498,8 +543,10 @@ EditorLButtonUp(wParam, lParam, msg, hwnd) {
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
     EditorPending.y2 := (lParam << 32 >> 48) / EditorScale
+    ; 画笔：追记末点；单点（仅点击无拖动）不提交
+    tooSmall := EditorPending.type = "brush" && EditorPending.points.Length < 2
     ; 忽略过小区域（防误触）：丢弃时释放其缓存，避免泄漏
-    if (Abs(EditorPending.x2 - EditorPending.x1) > 2 || Abs(EditorPending.y2 - EditorPending.y1) > 2) {
+    if !tooSmall && (Abs(EditorPending.x2 - EditorPending.x1) > 2 || Abs(EditorPending.y2 - EditorPending.y1) > 2) {
         EditorAnnotations.Push(EditorPending)
         EditorAppendAnnotationToLayer(EditorPending)  ; 增量烘焙到标注层（只画新标注，避免整层重绘）
     } else {
@@ -575,8 +622,8 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
 
     ; 工具按钮区（PixPin 风格：矩形 / 箭头 / 椭圆 / 马赛克，选中态由 EditorToolbarRefresh 刷新）
     ; 点击行为由 ToolbarPhase 分流：选区阶段=选工具+自动选第1色+进入编辑；编辑阶段=仅切工具
-    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克）
-    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["▦", "mosaic", "马赛克"]]
+    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克 ✎画笔）
+    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["▦", "mosaic", "马赛克"], ["✎", "brush", "画笔"]]
     for t in tools {
         c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", ToolbarToolClick.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c

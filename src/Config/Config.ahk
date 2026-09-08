@@ -119,6 +119,7 @@ EDIT_LINE_WIDTHS        := [2, 3, 6]                     ; 标注线宽档位（
 EDIT_LINE_WIDTH_DISPLAY := [8, 11, 15]   ; 粗细图标圆点字号（点，仅图标视觉，与实际线宽对应）
 EDIT_LINE_WIDTH_DEFAULT := 2                             ; 默认线宽档位（EDIT_LINE_WIDTHS 下标，1 起始；默认中档）
 EDIT_MOSAIC_CELL    := 10                                          ; 马赛克粒度（像素，越小越细）
+EDIT_BRUSH_MIN_DIST := 3                                          ; 画笔抽稀最小间距（显示空间像素，缩放后视觉疏密一致）
 EDIT_BORDER_WIDTH   := 3                                           ; 覆盖层边框宽度（像素，选区/编辑器/钉屏三阶段统一）
 EDIT_BORDER_COLOR   := 0xCC00A2E8                                 ; 覆盖层边框颜色（半透明天蓝 AARRGGBB，统一选区/编辑器/钉屏）
 EDIT_COLORS         := [0xFFFF0000, 0xFF00B050, 0xFF0070C0, 0xFFFFC000, 0xFF000000, 0xFFFFFFFF]  ; 标注颜色集（红/绿/蓝/黄/黑/白）
