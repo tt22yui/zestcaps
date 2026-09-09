@@ -49,6 +49,7 @@ global EditorDragWinX := 0, EditorDragWinY := 0  ; 拖动起点时的编辑窗�
 global EditorDragMouseX := 0, EditorDragMouseY := 0  ; 拖动起点时的鼠标屏幕坐标
 global EditorDragTargetX := 0, EditorDragTargetY := 0  ; 拖动目标位置（消息回调仅记录，定时器统一应用）
 global EditorDragAppliedX := 0, EditorDragAppliedY := 0  ; 已应用位置（定时器应用后记录，用于去重）
+global EditorCircleCursor := 0  ; 画笔/马赛克专用小圆圈光标（CreateCursor 动态生成，无外部 .cur；会话结束 DestroyCursor 释放）
 
 ; ------------------------------------------------------------------
 ; 标注数据结构：type + 图片空间坐标（x1,y1 起点 / x2,y2 终点）
@@ -59,10 +60,11 @@ class EditorAnnotation {
     type := ""
     x1 := 0, y1 := 0, x2 := 0, y2 := 0
     color := 0
-    penWidth := 0  ; 线宽（图片空间像素，创建时快照当前档位）
-    points := []  ; 画笔折线点（每项 {x,y}，图片空间坐标）；仅 type="brush" 使用
-    mosaic := 0  ; 马赛克压缩小图缓存（GDI+ bitmap，重绘复用，避免反复采样原图）
-    mosaicRw := 0, mosaicRh := 0  ; 缓存对应的裁剪后区域尺寸（图片空间）；区域变化时重建缓存
+    penWidth := 0  ; 线宽（图片空间像素，创建时快照当前档位）；arrow/rect/ellipse/brush 用
+    brushR := 0    ; 马赛克笔头半径（图片空间像素，创建时按当前粗细档位快照）；仅 type="mosaic" 用
+    points := []  ; 画笔折线点（每项 {x,y}，图片空间坐标）；仅 type="brush"/"mosaic" 使用
+    cells := Map()      ; 马赛克已像素化格集（key="row:col"，值固定）；仅 type="mosaic" 使用
+    cellColor := Map()  ; 每格平均色缓存（key="row:col" → ARGB，首次扫过算一次后固定）
 }
 
 ; ------------------------------------------------------------------
@@ -138,6 +140,7 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
     OnMessage(0x200, EditorMouseMove)
     OnMessage(0x202, EditorLButtonUp)
     OnMessage(0x204, EditorRButtonDown)
+    OnMessage(0x20, EditorSetCursor)   ; WM_SETCURSOR：画笔/马赛克用圆环光标
 
     try {
         ; 首帧渲染：先对隐藏窗口 UpdateLayeredWindow 再 Show，窗口一出现即为完整图像，避免空白矩形闪烁
@@ -177,6 +180,7 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
             OnMessage(0x200, EditorMouseMove, 0)
             OnMessage(0x202, EditorLButtonUp, 0)
             OnMessage(0x204, EditorRButtonDown, 0)
+            OnMessage(0x20, EditorSetCursor, 0)
         }
 
         ; 处理结果：按原图分辨率渲染最终图，再执行输出
@@ -386,48 +390,113 @@ EditorBrushAppendPoint(pend, x, y) {
         pend.points.Push({x: x, y: y})
 }
 
-; 马赛克：源区域先压缩（双线性平均），再按最近邻放大回目标区域 → 像素块效果
-; 压缩小图缓存到 ann.mosaic：首次渲染生成，此后重绘直接复用，避免反复采样原图
+; 马赛克（笔触式）：沿自由轨迹涂抹经典像素化格子。
+; ShareX Pixelate 同款画法：以图片原点为锚的固定全局格网（cell×cell），
+; 笔头圆扫过的每个格子，取该格在原图上的平均色填一块硬边矩形即可，格内同色。
+; 每格首次扫到算一次平均色并缓存（ann.cellColor[k]），此后固定不变——格网不随
+; 轨迹移动、格子不因包围盒扩张而重算，抹到哪格哪格稳定变块，无脏乱无重影。
 EditorDrawMosaic(G, ann, s) {
     global EditorBaseBitmap, EditorImgW, EditorImgH, EDIT_MOSAIC_CELL
-    ; 图片空间区域（裁剪到图内）
-    x1 := Max(0, Min(ann.x1, ann.x2))
-    y1 := Max(0, Min(ann.y1, ann.y2))
-    x2 := Min(EditorImgW, Max(ann.x1, ann.x2))
-    y2 := Min(EditorImgH, Max(ann.y1, ann.y2))
-    rw := x2 - x1, rh := y2 - y1
-    if (rw < 2 || rh < 2)
+    if !ann.points || ann.points.Length < 2
         return
-    ; 缓存区域变化（拖动预览时区域不断变大）→ 先释放再重建，保证内容跟随鼠标
-    if (ann.mosaic && (ann.mosaicRw != rw || ann.mosaicRh != rh)) {
-        Gdip_DisposeImage(ann.mosaic)
-        ann.mosaic := 0
+    ; 先按笔触轨迹标记被扫过的格子（含平均色缓存），再统一绘制；笔头半径取创建时快照的档位
+    EditorMosaicMarkTrail(ann, EditorBaseBitmap, EditorImgW, EditorImgH, EDIT_MOSAIC_CELL, ann.brushR)
+    ; 逐格绘制已像素化的格子（显示坐标 = 格索引 × cell × s），硬边矩形
+    Gdip_SetInterpolationMode(G, 5)   ; NearestNeighbor：格子硬边不被缩放柔化
+    for key in ann.cells {
+        rowCol := StrSplit(key, ":")
+        c := Integer(rowCol[1]), r := Integer(rowCol[2])
+        gx := c * EDIT_MOSAIC_CELL, gy := r * EDIT_MOSAIC_CELL
+        pBrush := Gdip_BrushCreateSolid(ann.cellColor[key])
+        Gdip_FillRectangle(G, pBrush, gx * s, gy * s, EDIT_MOSAIC_CELL * s, EDIT_MOSAIC_CELL * s)
+        Gdip_DeleteBrush(pBrush)
     }
-    if !ann.mosaic {
-        k := EDIT_MOSAIC_CELL
-        smallW := Max(1, Round(rw / k))
-        smallH := Max(1, Round(rh / k))
-        ; 1) 压缩：源区域 → 小图（双线性平均），仅此一次采样原图
-        ann.mosaic := Gdip_CreateBitmap(smallW, smallH)
-        G2 := Gdip_GraphicsFromImage(ann.mosaic)
-        Gdip_SetInterpolationMode(G2, 3)  ; Bilinear
-        Gdip_DrawImage(G2, EditorBaseBitmap, 0, 0, smallW, smallH, x1, y1, rw, rh)
-        Gdip_DeleteGraphics(G2)
-        ann.mosaicRw := rw, ann.mosaicRh := rh
+}
+; ------------------------------------------------------------------
+
+; 沿笔触轨迹标记被笔头圆扫过的所有格子，并缓存每格平均色
+; 关键：按「相邻采样点之间的线段」做胶囊覆盖（笔头半径 R 沿线段扫过），而非只圈孤立点圆。
+; 这样手画再快、采样点再稀，两点之间的线段区间也会被像素化满，不断不掉、粗细一致。
+EditorMosaicMarkTrail(ann, src, imgW, imgH, cell, R) {
+    if ann.points.Length < 2
+        return
+    loop ann.points.Length - 1 {
+        A := ann.points[A_Index], B := ann.points[A_Index + 1]
+        EditorMosaicMarkSegment(ann, src, imgW, imgH, cell, R, A.x, A.y, B.x, B.y)
     }
-    ; 2) 放大：缓存小图 → 目标区域（最近邻 → 像素块）
-    Gdip_GetImageDimensions(ann.mosaic, &mw, &mh)
-    Gdip_SetInterpolationMode(G, 5)   ; NearestNeighbor
-    Gdip_DrawImage(G, ann.mosaic, x1 * s, y1 * s, rw * s, rh * s, 0, 0, mw, mh)
-    Gdip_SetInterpolationMode(G, 6)   ; 恢复高质双线性
 }
 
-; 释放标注的缓存资源（马赛克小图；幂等）
-EditorReleaseAnnotationCache(ann) {
-    if ann.mosaic {
-        Gdip_DisposeImage(ann.mosaic)
-        ann.mosaic := 0
+; 标记线段 A→B 两侧各 R 宽度（胶囊）覆盖的所有格子（格心到线段距离 ≤ R）；幂等累积
+EditorMosaicMarkSegment(ann, src, imgW, imgH, cell, R, ax, ay, bx, by) {
+    R2 := R * R
+    c0 := Floor((Min(ax, bx) - R) / cell), c1 := Floor((Max(ax, bx) + R) / cell)
+    r0 := Floor((Min(ay, by) - R) / cell), r1 := Floor((Max(ay, by) + R) / cell)
+    r := r0
+    while r <= r1 {
+        c := c0
+        while c <= c1 {
+            gcx := c * cell + cell / 2, gcy := r * cell + cell / 2
+            if EditorDistToSeg2(gcx, gcy, ax, ay, bx, by) <= R2 {
+                key := c ":" r
+                if !ann.cells.Has(key) {
+                    ; 首次扫到：算该格平均色并缓存，此后固定不变
+                    ann.cells[key] := true
+                    ann.cellColor[key] := EditorCellAverage(src, c * cell, r * cell, cell, cell, imgW, imgH)
+                }
+            }
+            c++
+        }
+        r++
     }
+}
+
+; 点 (px,py) 到线段 A→B 的最短距离平方（垂足在线段上则取垂距，否则取到最近端点的距离）
+EditorDistToSeg2(px, py, ax, ay, bx, by) {
+    vx := bx - ax, vy := by - ay
+    wx := px - ax, wy := py - ay
+    len2 := vx * vx + vy * vy
+    t := 0
+    if len2 {                       ; 退化线段视作点 A
+        t := (wx * vx + wy * vy) / len2
+        if t < 0
+            t := 0
+        else if t > 1
+            t := 1
+    }
+    qx := ax + t * vx, qy := ay + t * vy
+    dx := px - qx, dy := py - qy
+    return dx * dx + dy * dy
+}
+
+; 求原图 [x,y,w,h] 区域的像素平均色（ARGB；区域越界自动裁剪到图内）
+EditorCellAverage(src, x, y, w, h, imgW, imgH) {
+    x := Max(0, x), y := Max(0, y)
+    w := Min(w, imgW - x), h := Min(h, imgH - y)
+    if (w <= 0 || h <= 0)
+        return 0
+    Gdip_LockBits(src, x, y, w, h, &Stride, &Scan0, &BitmapData, 3, 0x26200a)
+    sumR := 0, sumG := 0, sumB := 0, cnt := 0
+    py := 0
+    loop h {
+        row := Scan0 + py * Stride
+        px := 0
+        loop w {
+            sumB += NumGet(row, px * 4, "UChar")
+            sumG += NumGet(row, px * 4 + 1, "UChar")
+            sumR += NumGet(row, px * 4 + 2, "UChar")
+            cnt++
+            px++
+        }
+        py++
+    }
+    Gdip_UnlockBits(src, &BitmapData)
+    n := cnt ? cnt : 1
+    avR := Round(sumR / n), avG := Round(sumG / n), avB := Round(sumB / n)
+    return 0xFF000000 | (avR << 16) | (avG << 8) | avB
+}
+
+; 释放标注的缓存资源（Mosaic 无独立 bitmap，仅索引/平均色 Map，可复用同一对象退出即弃）
+EditorReleaseAnnotationCache(ann) {
 }
 
 ; ------------------------------------------------------------------
@@ -437,7 +506,7 @@ EditorLButtonDown(wParam, lParam, msg, hwnd) {
     global EditorHwnd, EditorPending, EditorTool, EditorColorIdx, EditorPenWidthIdx, EditorScale
     global EditorDragging, EditorDragWinX, EditorDragWinY, EditorDragMouseX, EditorDragMouseY
     global EditorToolbar, EditorColorToolbar
-    global EDIT_COLORS, EDIT_LINE_WIDTHS
+    global EDIT_COLORS, EDIT_LINE_WIDTHS, EDIT_MOSAIC_BRUSH_R
     if (hwnd != EditorHwnd)
         return
     ; 未选工具：左键拖动编辑窗（移动截图区域位置）
@@ -466,10 +535,12 @@ EditorLButtonDown(wParam, lParam, msg, hwnd) {
     EditorPending.y1 := (lParam << 32 >> 48) / EditorScale
     EditorPending.x2 := EditorPending.x1
     EditorPending.y2 := EditorPending.y1
-    if EditorTool = "brush" {          ; 画笔：初始化点集，首点入数组
+    if (EditorTool = "brush" || EditorTool = "mosaic") {   ; 画笔/马赛克：多点笔触，初始化点集，首点入数组
         EditorPending.points := []
         EditorBrushAppendPoint(EditorPending, EditorPending.x1, EditorPending.y1)
     }
+    if (EditorTool = "mosaic")   ; 马赛克笔头半径随当前粗细档位（细/中/粗 → 10/15/22）
+        EditorPending.brushR := EDIT_MOSAIC_BRUSH_R[EditorPenWidthIdx]
     DllCall("SetCapture", "Ptr", hwnd)
 }
 
@@ -491,7 +562,7 @@ EditorMouseMove(wParam, lParam, msg, hwnd) {
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
     EditorPending.y2 := (lParam << 32 >> 48) / EditorScale
-    if EditorTool = "brush"  ; 画笔：追加当前点为采样点（按抽稀阈值决定是否记录）
+    if (EditorTool = "brush" || EditorTool = "mosaic")  ; 画笔/马赛克：追加当前点（按抽稀阈值决定是否记录）
         EditorBrushAppendPoint(EditorPending, EditorPending.x2, EditorPending.y2)
     EditorRender()
 }
@@ -543,8 +614,8 @@ EditorLButtonUp(wParam, lParam, msg, hwnd) {
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
     EditorPending.y2 := (lParam << 32 >> 48) / EditorScale
-    ; 画笔：追记末点；单点（仅点击无拖动）不提交
-    tooSmall := EditorPending.type = "brush" && EditorPending.points.Length < 2
+    ; 画笔/马赛克：追记末点；单点（仅点击无拖动）不提交
+    tooSmall := (EditorPending.type = "brush" || EditorPending.type = "mosaic") && EditorPending.points.Length < 2
     ; 忽略过小区域（防误触）：丢弃时释放其缓存，避免泄漏
     if !tooSmall && (Abs(EditorPending.x2 - EditorPending.x1) > 2 || Abs(EditorPending.y2 - EditorPending.y1) > 2) {
         EditorAnnotations.Push(EditorPending)
@@ -567,6 +638,78 @@ EditorRButtonDown(wParam, lParam, msg, hwnd) {
         DllCall("ReleaseCapture")
         EditorRender()
     }
+}
+
+; ------------------------------------------------------------------
+; 光标：画笔/马赛克工具用小圆圈（WM_SETCURSOR 拦截，按当前工具切换）
+; 其他工具走默认（箭头）；未选工具拖动也走默认，避免编辑区拖动时光标怪异
+; ------------------------------------------------------------------
+EditorSetCursor(wParam, lParam, msg, hwnd) {
+    global EditorTool
+    if (hwnd != EditorHwnd)
+        return
+    if (EditorTool = "brush" || EditorTool = "mosaic")
+        return EditorApplyCircleCursor()   ; true=已处理（用小圆圈）；false=交系统默认
+    return false  ; 交给系统默认
+}
+
+; 应用小圆圈光标（画笔/马赛克）；返回 true 表示已设置，false 表示生成失败走默认
+EditorApplyCircleCursor() {
+    global EditorCircleCursor
+    if !EditorCircleCursor
+        EditorCircleCursor := EditorCreateCircleCursor()
+    if EditorCircleCursor {
+        DllCall("SetCursor", "Ptr", EditorCircleCursor)
+        return true
+    }
+    return false
+}
+
+; 动态生成画笔/马赛克用「小圆圈」光标：32×32 ARGB 真透明光标（白描边 + 黑圆环，深浅背景都可见）
+; 用 GDI+ 绘制位图 → Gdip_CreateHBITMAPFromBitmap → CreateIconIndirect(fIcon=FALSE) 生成：
+; 32 位 alpha 原生支持真透明 + 抗锯齿，只有圆环本体出现、四周与中心全透明、清晰不糊，
+; 彻底规避 CreateCursor 单色位平面导致的「大方块/残留/糊」问题。热点居中(16,16)，对准笔触中心。
+EditorCreateCircleCursor() {
+    ; 绘制 32×32 ARGB 圆环（底全透明，白外圈 + 黑内圈）
+    bmp := Gdip_CreateBitmap(32, 32)
+    G := Gdip_GraphicsFromImage(bmp)
+    Gdip_SetSmoothingMode(G, 4)          ; AntiAlias：圆环边缘平滑
+    Gdip_GraphicsClear(G, 0x00FFFFFF)    ; 全透明底
+    p1 := Gdip_CreatePen(0xFFFFFFFF, 4)  ; 白描边（外圈，保证黑环在深色背景上可见）
+    Gdip_DrawEllipse(G, p1, 4, 4, 24, 24)
+    p2 := Gdip_CreatePen(0xFF000000, 2)  ; 黑圆环（内圈，主体）
+    Gdip_DrawEllipse(G, p2, 6, 6, 20, 20)
+    Gdip_DeletePen(p1)
+    Gdip_DeletePen(p2)
+    Gdip_DeleteGraphics(G)
+    hbmp := Gdip_CreateHBITMAPFromBitmap(bmp, 0xFF000000)
+    Gdip_DisposeImage(bmp)
+
+    ; hbmMask：CreateIconIndirect 要求有效单色 mask 句柄（不能 NULL）。
+    ; 32×32 全 1（AND 全置位）→ 不透出底板，透明完全交由 hbmColor 的 alpha 决定
+    mBuf := Buffer(32 * 4, 0xFF)   ; 单色位图位域：每像素 1 bit，32 位 → 每行 4 字节，全 0xFF=全 1
+    mmask := DllCall("CreateBitmap", "Int", 32, "Int", 32, "UInt", 1, "UInt", 1, "Ptr", mBuf, "Ptr")
+    if !hbmp || !mmask {   ; 任一位图创建失败即放弃，避免无效资源进 ICONINFO
+        if hbmp
+            DllCall("DeleteObject", "Ptr", hbmp)
+        if mmask
+            DllCall("DeleteObject", "Ptr", mmask)
+        return 0
+    }
+
+    ; 组装 ICONINFO 生成光标（fIcon=FALSE → 光标）；热点居中(16,16)
+    maskOff := (3 * 4 + (A_PtrSize - 1)) // A_PtrSize * A_PtrSize   ; 前 3 个 DWORD 后按指针对齐
+    colorOff := maskOff + A_PtrSize
+    ii := Buffer(colorOff + A_PtrSize, 0)
+    NumPut("UInt", 0, ii, 0)            ; fIcon = 0 → 光标
+    NumPut("UInt", 16, ii, 4)           ; xHotspot
+    NumPut("UInt", 16, ii, 8)           ; yHotspot
+    NumPut("Ptr", mmask, ii, maskOff)   ; hbmMask（全 1 单色，不透底）
+    NumPut("Ptr", hbmp, ii, colorOff)   ; hbmColor（32 位 alpha 圆环）
+    hcur := DllCall("CreateIconIndirect", "Ptr", ii, "Ptr")
+    DllCall("DeleteObject", "Ptr", mmask)  ; 位图已由光标持有，随即释放
+    DllCall("DeleteObject", "Ptr", hbmp)
+    return hcur
 }
 
 ; ------------------------------------------------------------------
@@ -803,6 +946,11 @@ ToolbarToolClick(name, *) {
     }
     EditorTool := name
     EditorToolbarRefresh()
+    ; 切到画笔/马赛克立刻应用圆环光标；其他工具恢复系统默认（鼠标静止时 WM_SETCURSOR 不触发，需主动刷新）
+    if (name = "brush" || name = "mosaic")
+        EditorApplyCircleCursor()
+    else
+        DllCall("SetCursor", "Ptr", 0)
 }
 
 ; 输出按钮：选区阶段 = 写结果给选区调度；编辑阶段 = 转发编辑器动作
@@ -1022,6 +1170,7 @@ EditorOverlayCleanup() {
 EditorCleanup() {
     global EditorGui, EditorHwnd, EditorWorkBitmap, EditorBaseBitmap
     global EditorPending, EditorResult, EditorAnnotations, EditorBgBitmap, EditorBgBase
+    global EditorCircleCursor
     EditorCloseOverlays()
     EditorOverlayCleanup()
     if EditorGui {
@@ -1048,6 +1197,10 @@ EditorCleanup() {
     if EditorBgBase {
         Gdip_DisposeImage(EditorBgBase)
         EditorBgBase := 0
+    }
+    if EditorCircleCursor {   ; 释放动态光标（CreateCursor 句柄）
+        DllCall("DestroyCursor", "Ptr", EditorCircleCursor)
+        EditorCircleCursor := 0
     }
     if EditorBaseBitmap {
         Gdip_DisposeImage(EditorBaseBitmap)
