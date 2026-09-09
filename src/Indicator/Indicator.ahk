@@ -36,6 +36,7 @@ _UpdateIndicator() {
     static prevLabel := "", prevBg := "", prevTxt := ""
     static prevX := 0, prevY := 0, prevVisible := false
     static prevHwnd := 0
+    static imeFailStreak := 0   ; IME 检测连续失败计数（仅用于日志节流：只在失败起始拍记一条）
 
     ; 功能关闭时不再做 IME 检测，仅负责隐藏已显示的指示器
     if !IndicatorEnabled {
@@ -51,9 +52,23 @@ _UpdateIndicator() {
 
     ; ---- 中/英判定 ----
     ; 优先级：真实转换检测 > 布局确定英文 > 跟踪状态（仅 TSF/WebView2 等经典读法不可信时兜底）
-    conv := DetectIMEByConversion(activeHwnd)
-    layout := activeHwnd ? DetectIMEByLayout(activeHwnd) : "unknown"
-    imcValid := activeHwnd ? DetectIMCValid(activeHwnd) : false
+    conv := -1
+    layout := "unknown"
+    imcValid := false
+    try {
+        ; 三个 DllCall 检测在极端情况下可能抛运行时异常（imm32/user32 理论极低），
+        ; 定时器回调内一旦抛出会弹错误框且反复触发。故整体兜底为「不确定」，
+        ; 由下方分支按 layout/imcValid/SawChinese 的现有逻辑自然退化到跟踪状态。
+        conv := DetectIMEByConversion(activeHwnd)
+        layout := activeHwnd ? DetectIMEByLayout(activeHwnd) : "unknown"
+        imcValid := activeHwnd ? DetectIMCValid(activeHwnd) : false
+        imeFailStreak := 0
+    } catch {
+        ; 检测异常：连续失败只记失败起始拍的日志，避免每 80ms 周期刷屏
+        imeFailStreak += 1
+        if imeFailStreak = 1
+            DebugLog("_UpdateIndicator: IME 检测异常(DllCall 抛错)，兜底为不确定状态(连续失败 #1)")
+    }
 
     if (conv = 1) {
         ; 真实读到中文，锁定为中文并记录「该进程转换读法可信」（供后续 conv=0 时判断是否为真实英文）
