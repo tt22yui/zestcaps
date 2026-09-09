@@ -19,13 +19,14 @@ SplashEnabled := false         ; 跳过闪屏窗口
 #Include "..\..\src\Screenshot\Screenshot.ahk"
 #Include "..\..\src\Hotkeys\Hotkeys.ahk"       ; 自定义快捷键（注册/校验）
 #Include "..\..\src\Settings\Settings.ahk"
+#Include "..\..\src\Updater\Updater.ahk"        ; GitHub 自动更新（仅编译 exe 生效）
 #Include "..\..\src\TrayMenu\TrayMenu.ahk"
 
 testFile := A_Temp "\_tmp_main_load_test.txt"
 try FileDelete(testFile)
 
-; 看门狗：8 秒强制退出，防止测试期间创建的窗口残留
-SetTimer(() => ExitApp(), 8000)
+; 看门狗：15 秒强制退出，防止测试期间创建的窗口残留（Updater 纯逻辑验证需要比原来多几个毫秒但整体仍远小于 15 秒）
+SetTimer(() => ExitApp(), 15000)
 
 ; 复现 Main.ahk 的启动耗时打点表达式，验证变量可用、拼接无错
 try {
@@ -47,5 +48,39 @@ try {
     FileAppend "OK: 自定义快捷键注册成功 (" PastePlainKey " / " ScreenshotKey ")`n", testFile
 } catch as err {
     FileAppend "FAIL: 自定义快捷键注册失败: " err.Message " @" err.Line "`n", testFile
+}
+
+; 验证 Updater 纯逻辑（不触发网络请求）：JSON 解析 + 版本比较判定
+try {
+    sample := '{"tag_name":"v0.4.0","assets":[{"name":"zestcaps_v0.4.0.exe","browser_download_url":"https://github.com/x/y/releases/download/v0.4.0/zestcaps_v0.4.0.exe"},{"name":"x.sha256","browser_download_url":"https://github.com/x/y/releases/download/v0.4.0/x.exe.sha256"}]}'
+    res := Map()
+    ParseGithubRelease(sample, &res)
+    if res["latestVersion"] != "0.4.0"
+        throw Error("tag 解析失败: " res["latestVersion"])
+    if res["exeUrl"] != "https://github.com/x/y/releases/download/v0.4.0/zestcaps_v0.4.0.exe"
+        throw Error("exeUrl 解析失败")
+    if res["shaUrl"] != "https://github.com/x/y/releases/download/v0.4.0/zestcaps_v0.4.0.exe.sha256"
+        throw Error("shaUrl 解析失败")
+    ; 版本比较：AP.exe 当前 0.3.2 < 0.4.0 → 需要更新
+    if VerCompare(res["latestVersion"], APP_VERSION) <= 0
+        throw Error("版本比较判定错误")
+    FileAppend "OK: Updater.JSON解析/版本比较通过`n", testFile
+} catch as err {
+    FileAppend "FAIL: Updater 逻辑: " err.Message " @" err.Line "`n", testFile
+}
+
+; 验证 Updater 的 sha256 首行哈希读取 + 计算函数（本地自算互证，不依赖网络）
+try {
+    probe := A_Temp "\_tmp_updater_sha_test.txt"
+    FileAppend "abcdef1234567890abcdef1234567890  probe.txt`n", probe, "UTF-8-RAW"
+    h := ReadFirstHash(probe)
+    if h != "abcdef1234567890abcdef1234567890"
+        throw Error("ReadFirstHash 失败: " h)
+    if SHA256Hex(A_ScriptFullPath) = ""
+        throw Error("SHA256Hex 计算失败")
+    try FileDelete(probe)
+    FileAppend "OK: Updater.SHA256读取/计算通过`n", testFile
+} catch as err {
+    FileAppend "FAIL: Updater SHA256: " err.Message " @" err.Line "`n", testFile
 }
 ExitApp()

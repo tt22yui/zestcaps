@@ -22,7 +22,7 @@ ReadRBTime(hourEdit, minEdit) {
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
 ; editPasteKey/editShotKey：两个快捷键文本框（AHK 原生格式，如 ^v / F1）
 ; rbOn / editKeepDays / editTimeHour / editTimeMin：回收站页开关、保留天数、每日清空时刻（时/分两个 UpDown 编辑框）
-SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, DesktopShortcutOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
+SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, DesktopShortcutOn, AutoUpdateOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
     global CONFIG_FILE
     ; 快捷键冲突校验（非法 / CapsLock / 两功能相同均在此拦截）
     err := ValidateHotkeyPair(editPasteKey.Value, editShotKey.Value, "纯文本粘贴", "区域截图")
@@ -44,6 +44,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
         IniWrite (DesktopShortcutOn ? 1 : 0), CONFIG_FILE, "Features", "DesktopShortcutEnabled"
         IniWrite (SplashOn ? 1 : 0), CONFIG_FILE, "Features", "SplashEnabled"
         IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
+        IniWrite (AutoUpdateOn ? 1 : 0), CONFIG_FILE, "Features", "AutoUpdateEnabled"
         ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
         IniWrite Integer(editKeepDays.Value), CONFIG_FILE, "RecycleBin", "KeepDays"
         IniWrite ReadRBTime(editTimeHour, editTimeMin), CONFIG_FILE, "RecycleBin", "Time"
@@ -96,6 +97,7 @@ CloseSettings(GuiObj) {
 OpenSettings() {
     global MENU_TITLE
     global HOTKEY_FORMAT_HINT
+    global APP_VERSION
     global IndicatorEnabled, PastePlainEnabled, ScreenshotEnabled
     global StartupEnabled, SplashEnabled, DesktopShortcutEnabled
     global PastePlainKey, ScreenshotKey
@@ -112,9 +114,9 @@ OpenSettings() {
     settingsGui.OnEvent("Escape", (*) => CloseSettings(settingsGui))
     settingsGui.SetFont("s9", "Microsoft YaHei")
 
-    ; 页签分组：通用（启动相关）/ 指示器 / 剪贴板（粘贴）/ 截图（开关）
+    ; 页签分组：通用（启动相关）/ 指示器 / 剪贴板（粘贴）/ 截图（开关）/ 回收站 / 关于
     ; 各功能模块开关归入各自页签，对应快捷键跟随所在页签，新增模块只需加页签
-    tabCtl := settingsGui.Add("Tab3", "x14 y12 w360 h240", ["通用", "指示器", "剪贴板", "截图", "回收站"])
+    tabCtl := settingsGui.Add("Tab3", "x14 y12 w360 h240", ["通用", "指示器", "剪贴板", "截图", "回收站", "关于"])
 
     ; ---- 通用页：启动相关设置 ----
     settingsGui.Add("GroupBox", "x28 y40 w332 h140", "启动选项")
@@ -178,10 +180,29 @@ OpenSettings() {
     editTimeMin.Text  := Format("{:02}", uddTimeMin.Value)
     settingsGui.Add("Text", "x44 y156 w312 h20", "上下微调或直接输入 24 时制")
 
+    ; ---- 关于页：版本信息 + 自动更新（精简文字，沿用 x28/x44 对齐网格）----
+    tabCtl.UseTab(6)
+    ; 版本信息分组（一行精简）
+    settingsGui.Add("GroupBox", "x28 y40 w332 h64", "版本信息")
+    settingsGui.Add("Text", "x44 y62 w44 h20", "版本")
+    settingsGui.Add("Text", "x88 y62 w240 h20", "v" APP_VERSION "（AutoHotkey v2 · MIT）")
+    ; 自动更新分组：开关 + 手动检查（点击即反馈：不确定进度条脉冲 + 状态文本，不依赖 TrayTip）
+    settingsGui.Add("GroupBox", "x28 y128 w332 h116", "自动更新")
+    cbAutoUpdate := settingsGui.Add("CheckBox", "x44 y146 w220 h22", "启动时自动检查更新")
+    cbAutoUpdate.Value := AutoUpdateEnabled
+    if !A_IsCompiled
+        cbAutoUpdate.Enabled := false              ; 源码运行不支持自动更新，禁用避免误导
+    btnUpdate := settingsGui.Add("Button", "x44 y176 w120 h26", "检查更新")
+    settingsGui.Add("Text", "x172 y182 w160 h18", "自动从 GitHub 最新仓库更新")
+    updProg := settingsGui.Add("Progress", "x44 y208 w300 h8", 0)
+    updProg.Visible := false                       ; 默认隐藏，点击后才显示脉冲
+    updStatus := settingsGui.Add("Text", "x44 y222 w300 h20", (A_IsCompiled ? "点击「检查更新」查看 GitHub 是否发布新版本" : "自动更新仅编译版可用（源码运行不检查网络）"))
+    btnUpdate.OnEvent("Click", (*) => HandleUpdateClick(btnUpdate, updProg, updStatus))
+
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, cbDesktopShortcut.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, cbDesktopShortcut.Value, cbAutoUpdate.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 
@@ -189,4 +210,65 @@ OpenSettings() {
     ; 沉浸式深色标题栏（Win11）：对齐应用暗色品牌，让窗口标题栏与暗色图标/工具栏同源；
     ; DWM 属性(20=DWMWA_USE_IMMERSIVE_DARK_MODE)在 Win10 或显卡不支持时静默失效，try 兜底不弹错
     try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", settingsGui.Hwnd, "UInt", 20, "Int*", true, "UInt", 4)
+}
+
+; ==================================================================
+; 「检查更新」交互：点击即反馈 + 异步检查 + GUI 状态展示
+; 反馈不依赖 TrayTip（系统通知可能被忽略），改用窗口内进度条与状态文本
+; ==================================================================
+
+; 「检查更新」按钮点击处理：源码模式直接提示；否则立即显示"正在检查"并异步发起
+HandleUpdateClick(btnUpdate, updProg, updStatus) {
+    if !A_IsCompiled {
+        updStatus.Text := "自动更新仅编译版可用（源码运行不检查网络）"
+        return
+    }
+    ; 防止重复点击
+    if !btnUpdate.Enabled
+        return
+    btnUpdate.Enabled := false
+    btnUpdate.Text := "检查中…"
+    updProg.Value := 0
+    updProg.Visible := true
+    updStatus.Text := "正在检查更新…"
+    ; 不确定进度条脉冲动画：检查通常 1 秒内完成，仅用于明确告知"点击已生效"
+    upv := 0
+    pulse := () => (upv := (upv >= 100 ? 5 : upv + 8), updProg.Value := upv)
+    SetTimer pulse, 80
+    CheckForUpdateAsync((r) => HandleUpdateDone(btnUpdate, updProg, updStatus, r, pulse))
+}
+
+; 处理异步检查结果：停动画、更新状态文本；发现新版则弹窗确认下载
+HandleUpdateDone(btnUpdate, updProg, updStatus, result, pulse) {
+    global APP_VERSION
+    SetTimer pulse, 0
+    updProg.Value := 100
+    btnUpdate.Enabled := true
+    btnUpdate.Text := "检查更新"
+    if result["error"] != "" {
+        updStatus.Text := "检查失败：" result["error"]
+        return
+    }
+    if !result["needUpdate"] {
+        updStatus.Text := "已是最新版本 v" APP_VERSION
+        return
+    }
+    newVer := result["latestVersion"]
+    exeUrl := result["exeUrl"]
+    if exeUrl = "" {
+        updStatus.Text := "发现新版本 v" newVer "，但未找到下载文件"
+        return
+    }
+    updStatus.Text := "发现新版本 v" newVer
+    answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否下载并更新？更新完成后将自动重启。", "ZestCaps 更新", "YesNo IconQuestion")
+    if answer = "Yes"
+        DownloadAndReplaceResult(exeUrl, result["shaUrl"], updStatus)
+}
+
+; 下载并替换；同时更新关于页状态文本，让用户看到下载/校验进度
+DownloadAndReplaceResult(exeUrl, shaUrl, updStatus) {
+    ; 复用 Updater 的原生下载/校验/替换，但其内部用 TrayTip 提示；
+    ; 这里先给出窗口内反馈，最终结果由重启与否决定。
+    updStatus.Text := "正在下载更新…完成后将自动替换并重启。"
+    DownloadAndReplace(exeUrl, shaUrl)
 }

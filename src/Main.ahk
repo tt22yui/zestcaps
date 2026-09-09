@@ -23,6 +23,7 @@ DebugLog("启动耗时: Screenshot 加载完成 " (A_TickCount - SCRIPT_LOAD_STA
 #Include "RecycleBin\RecycleBin.ahk"      ; 定时清空回收站
 #Include "Hotkeys\Hotkeys.ahk"        ; 可配置快捷键（读取/注册/校验）
 #Include "Settings\Settings.ahk"      ; 设置窗口
+#Include "Updater\Updater.ahk"        ; GitHub 自动更新（仅编译 exe 生效）
 #Include "TrayMenu\TrayMenu.ahk"      ; 托盘菜单
 ; ==================================================================
 DebugLog("=== 脚本启动 v" APP_VERSION "（总加载耗时 " (A_TickCount - SCRIPT_LOAD_START) " ms）===")

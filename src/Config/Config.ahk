@@ -13,6 +13,14 @@ SCRIPT_LOAD_START := A_TickCount
 APP_VERSION := "0.3.2"
 ; ==================================================================
 
+; ==================================================================
+; GitHub 自动更新（仅编译 exe 生效；值须与仓库/Release 一致）
+; ==================================================================
+APP_GITHUB_OWNER := "tt22yui"    ; GitHub 用户名
+APP_GITHUB_REPO  := "zestcaps"   ; 仓库名
+APP_GITHUB_API_URL := "https://api.github.com/repos/" APP_GITHUB_OWNER "/" APP_GITHUB_REPO "/releases/latest"  ; 最新 release 接口
+; ==================================================================
+
 ; 配置文件不存在时自动创建（仅写入菜单开关状态）
 if !FileExist(CONFIG_FILE) {
     IniWrite 1, CONFIG_FILE, "Indicator", "IndicatorEnabled"
@@ -22,6 +30,7 @@ if !FileExist(CONFIG_FILE) {
     IniWrite 0, CONFIG_FILE, "Features", "DesktopShortcutEnabled"
     IniWrite 1, CONFIG_FILE, "Features", "SplashEnabled"
     IniWrite 0, CONFIG_FILE, "Features", "RecycleBinEnabled"
+    IniWrite 1, CONFIG_FILE, "Features", "AutoUpdateEnabled"
 }
 
 ; ==================================================================
@@ -85,6 +94,7 @@ StartupEnabled          := IniRead(CONFIG_FILE, "Features", "StartupEnabled", 0)
 DesktopShortcutEnabled  := IniRead(CONFIG_FILE, "Features", "DesktopShortcutEnabled", 0) = "1"          ; 桌面快捷方式：1=创建 0=不创建（默认关）
 SplashEnabled           := IniRead(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
 RecycleBinEnabled       := IniRead(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
+AutoUpdateEnabled       := IniRead(CONFIG_FILE, "Features", "AutoUpdateEnabled", 1) = "1"             ; 自动检查更新：1=开 0=关（默认开，仅编译版生效）
 ; ==================================================================
 ; 定时清空回收站参数（KeepDays/Time 由设置页保存到 config.ini 的 [RecycleBin] 段）
 ; ==================================================================
