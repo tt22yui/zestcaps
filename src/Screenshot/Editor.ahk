@@ -848,7 +848,9 @@ EditorTextCreateOverlay() {
     eg.MarginX := 0, eg.MarginY := 0
     eg.BackColor := EDIT_TEXT_BG
     box := eg.Add("Edit", "Background" EDIT_TEXT_BG " " colorStr) ; 单行输入（Enter 提交）
-    box.SetFont("s" Round(fontSize * 0.75), EDIT_TEXT_FONT)       ; Edit 字号用 pt 近似（72/96 折算）
+    ; Edit 字号需精确等于 fontSize（像素）才能与最终渲染一致：SetFont 用「点(pt)」，pt→px 随系统 DPI
+    ; 缩放，故按 DPI 反算 pt = px * 72 / DPI（不动则 100% 屏用 *0.75，高 DPI 下输入框字号偏大→大小不符）
+    box.SetFont("s" Max(1, Round(fontSize * 72 / A_ScreenDPI)), EDIT_TEXT_FONT)
     EditorTextEditBox := box
     EditorTextEditGui := eg
     boxH_tmp := Max(Round(fontSize * 1.6) + 8, 40)
