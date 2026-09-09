@@ -59,6 +59,11 @@ EditorEscDispatch(*) {
         ScreenshotEscCancel.Call()   ; 截图选区：取消选区（Screenshot.ahk 设置）
         return
     }
+    ; 文本输入会话进行中：Esc 先取消本次文本输入（而非关闭编辑窗）
+    if EditorTextSessionActive() {
+        EditorTextCancel()
+        return
+    }
     if WinExist("ahk_id " EditorHwnd) {
         EditorEscClose()             ; 编辑模式：取消当前编辑（Editor.ahk 定义）
         return

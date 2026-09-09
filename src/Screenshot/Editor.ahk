@@ -50,6 +50,10 @@ global EditorDragMouseX := 0, EditorDragMouseY := 0  ; 拖动起点时的鼠标�
 global EditorDragTargetX := 0, EditorDragTargetY := 0  ; 拖动目标位置（消息回调仅记录，定时器统一应用）
 global EditorDragAppliedX := 0, EditorDragAppliedY := 0  ; 已应用位置（定时器应用后记录，用于去重）
 global EditorCircleCursor := 0  ; 画笔/马赛克专用小圆圈光标（CreateCursor 动态生成，无外部 .cur；会话结束 DestroyCursor 释放）
+global EditorTextEditGui := 0   ; 文本标注输入覆盖窗 Gui（原生 Edit，支持中文 IME/光标/粘贴）
+global EditorTextEditBox := 0   ; 输入覆盖窗 Edit 控件
+global EditorTextPending := 0   ; 进行中的文本标注对象（图片空间锚点/色/字号；提交时填 text）
+global EditorTextCommitting := false  ; 提交/结束进行中防重入：WM_KILLFOCUS 在销毁窗口时触发，据此拦截二次提交
 
 ; ------------------------------------------------------------------
 ; 标注数据结构：type + 图片空间坐标（x1,y1 起点 / x2,y2 终点）
@@ -63,6 +67,8 @@ class EditorAnnotation {
     penWidth := 0  ; 线宽（图片空间像素，创建时快照当前档位）；arrow/rect/ellipse/brush 用
     brushR := 0    ; 马赛克笔头半径（图片空间像素，创建时按当前粗细档位快照）；仅 type="mosaic" 用
     points := []  ; 画笔折线点（每项 {x,y}，图片空间坐标）；仅 type="brush"/"mosaic" 使用
+    text := ""    ; 文本内容；仅 type="text" 使用（x1,y1 为文本底块左上角锚点）
+    fontSize := 0 ; 字号（图片空间像素，创建时按当前粗细档位快照）；仅 type="text" 使用
     cells := Map()      ; 马赛克已像素化格集（key="row:col"，值固定）；仅 type="mosaic" 使用
     cellColor := Map()  ; 每格平均色缓存（key="row:col" → ARGB，首次扫过算一次后固定）
 }
@@ -85,7 +91,7 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
     global EditorBaseBitmap, EditorImgW, EditorImgH, EditorScale, EditorWinW, EditorWinH
     global EditorBgBitmap
     global EditorGui, EditorHwnd, EditorAnnotations, EditorPending
-    global EditorTool, EditorColorIdx, EditorResult
+    global EditorTool, EditorColorIdx, EditorPenWidthIdx, EditorResult
     global EditorMaskOv, EditorBorders
     global EDIT_SCREEN_MARGIN, EDIT_LINE_WIDTH_DEFAULT
 
@@ -325,8 +331,82 @@ EditorDrawAnnotation(G, ann, s) {
             Gdip_DeletePen(pPen)
         case "mosaic":
             EditorDrawMosaic(G, ann, s)
+        case "text":
+            EditorDrawText(G, ann, s)
         case "brush":
             EditorDrawBrush(G, ann, s)
+    }
+}
+
+; ------------------------------------------------------------------
+; 文本标注：Flameshot 式「半透明深色底块 + 彩色文字」，任何截图背景下都清晰可读
+; 锚点 x1,y1 为底块左上角（图片空间）；字号 ann.fontSize 随粗细档位快照
+; ------------------------------------------------------------------
+EditorDrawText(G, ann, s) {
+    global EDIT_TEXT_FONT, EDIT_TEXT_BG_ALPHA, EDIT_TEXT_PADDING
+    if ann.text = ""
+        return
+    fontSize := Max(1, ann.fontSize * s)                    ; 当前 graphics 空间字号（显示=缩放，输出=原大）
+    dims := EditorTextMeasure(G, ann.text, fontSize, EDIT_TEXT_FONT)   ; 量文本尺寸（Regular，与绘制同字体同度量）
+    pad := EDIT_TEXT_PADDING * s
+    bw := dims.w + 2 * pad
+    bh := dims.h + 2 * pad
+    xb := ann.x1 * s, yb := ann.y1 * s
+    ; 半透明深色底块（黑 + EDIT_TEXT_BG_ALPHA 不透明度）
+    pBrush := Gdip_BrushCreateSolid((EDIT_TEXT_BG_ALPHA << 24) | 0x000000)
+    Gdip_FillRectangle(G, pBrush, xb, yb, bw, bh)
+    Gdip_DeleteBrush(pBrush)
+    ; 底块上画文字（左上角对齐，左留白）
+    EditorTextDraw(G, ann.text, xb + pad, yb + pad, fontSize, ann.color, EDIT_TEXT_FONT)
+}
+
+; 测量文本在当前 graphics 空间的自然尺寸（像素宽/高），供底块自适应
+; 直接 DllCall GdipMeasureString：库封装的 Gdip_MeasureString/Gdip_DrawString 的 &RectF
+; 在 AHK v2 (>=2.0) 下不接受 Buffer 作 byref，故自造 RECTF Buffer 直调 GDI+
+EditorTextMeasure(G, text, fontSize, fontFamily) {
+    out := { w: 0, h: fontSize * 1.2 }   ; 兜底：失败时按字号粗估
+    try {
+        hFamily := Gdip_FontFamilyCreate(fontFamily)
+        hFont := Gdip_FontCreate(hFamily, fontSize, 0)
+        hFormat := Gdip_StringFormatCreate(0x1000)   ; StringFormatFlagsNoWrap：单行自然尺寸
+        RC := Buffer(16)
+        NumPut("float", 0, "float", 0, "float", 100000, "float", 100000, RC, 0)  ; 布局框 x,y,w,h
+        outR := Buffer(16)
+        chars := 0, lines := 0
+        st := DllCall("gdiplus\GdipMeasureString"
+                , "Ptr", G, "Str", text, "int", -1
+                , "Ptr", hFont, "Ptr", RC, "Ptr", hFormat
+                , "Ptr", outR, "UInt*", &chars, "UInt*", &lines)
+        if (st = 0) {   ; Gdiplus::Ok
+            w := NumGet(outR, 8, "float")
+            h := NumGet(outR, 12, "float")
+            if (w > 0 && h > 0)
+                out := { w: w, h: h }
+        }
+        Gdip_DeleteStringFormat(hFormat)
+        Gdip_DeleteFont(hFont)
+        Gdip_DeleteFontFamily(hFamily)
+    }
+    return out
+}
+
+; 在指定位置绘制文本（左上对齐、NoWrap；直接 DllCall GdipDrawString，绕开库 RECTF byref 限制）
+EditorTextDraw(G, text, x, y, fontSize, color, fontFamily) {
+    try {
+        hFamily := Gdip_FontFamilyCreate(fontFamily)
+        hFont := Gdip_FontCreate(hFamily, fontSize, 0)
+        hFormat := Gdip_StringFormatCreate(0x1000)   ; NoWrap
+        RC := Buffer(16)
+        NumPut("float", x, "float", y, "float", 100000, "float", 100000, RC, 0)
+        pBrush := Gdip_BrushCreateSolid(color)
+        DllCall("gdiplus\GdipDrawString"
+                , "Ptr", G, "Str", text, "int", -1
+                , "Ptr", hFont, "Ptr", RC, "Ptr", hFormat
+                , "Ptr", pBrush)
+        Gdip_DeleteBrush(pBrush)
+        Gdip_DeleteStringFormat(hFormat)
+        Gdip_DeleteFont(hFont)
+        Gdip_DeleteFontFamily(hFamily)
     }
 }
 
@@ -509,6 +589,12 @@ EditorLButtonDown(wParam, lParam, msg, hwnd) {
     global EDIT_COLORS, EDIT_LINE_WIDTHS, EDIT_MOSAIC_BRUSH_R
     if (hwnd != EditorHwnd)
         return
+    ; 文本输入会话期间点击编辑窗 = 本次点击仅提交文本并退出编辑模式
+    ; （不再继续由本次点击新建文本框；要再添加一段文字需另行点击一次）
+    if EditorTextSessionActive() {
+        EditorTextCommit()
+        return
+    }
     ; 未选工具：左键拖动编辑窗（移动截图区域位置）
     ; 消息回调只记录起点与目标，实际移动由 EditorDragTick 定时器合并应用（避免高频消息同步移动导致掉帧）
     if (EditorTool = "") {
@@ -525,6 +611,11 @@ EditorLButtonDown(wParam, lParam, msg, hwnd) {
             EditorColorToolbar.Hide()
         DllCall("SetCapture", "Ptr", hwnd)
         SetTimer EditorDragTick, 10
+        return
+    }
+    ; 文本工具：点击处就地开启原生 Edit 输入会话（不进入通用 pending 绘制流程）
+    if (EditorTool = "text") {
+        EditorTextStartAt((lParam << 48 >> 48) / EditorScale, (lParam << 32 >> 48) / EditorScale)
         return
     }
     EditorPending := EditorAnnotation()
@@ -713,6 +804,165 @@ EditorCreateCircleCursor() {
 }
 
 ; ------------------------------------------------------------------
+; 文本标注输入会话：点击 → 就地弹原生 Edit 覆盖窗（支持中文 IME/光标/粘贴）
+;   → 输入 → Enter 提交 / Esc·点击外部·切工具 时提交或取消
+; 提交将文本渲染为「半透明底块 + 彩色文字」标注并入标注层
+; ------------------------------------------------------------------
+EditorTextSessionActive() {
+    global EditorTextEditGui
+    return IsObject(EditorTextEditGui)
+}
+
+; 在图片空间坐标 (ix,iy) 处开启文本输入会话（先防御清理遗留会话）
+EditorTextStartAt(ix, iy) {
+    global EditorTextPending, EditorColorIdx, EditorPenWidthIdx
+    global EDIT_COLORS, EDIT_TEXT_FONT_SIZE
+    EditorTextEnd()   ; 防御：清理可能残留的会话
+    EditorTextPending := EditorAnnotation()
+    EditorTextPending.type := "text"
+    EditorTextPending.color := EDIT_COLORS[EditorColorIdx]
+    EditorTextPending.fontSize := EDIT_TEXT_FONT_SIZE[EditorPenWidthIdx]  ; 字号随粗细档位快照
+    EditorTextPending.x1 := ix
+    EditorTextPending.y1 := iy
+    EditorTextCreateOverlay()
+}
+
+; 创建原生 Edit 输入覆盖窗（压在编辑窗上方，前景色=选中色、字号随档位、深色底预览）
+; 尺寸校准：Edit 字体以 pt 计且随系统 DPI 缩放，与预估的显示px 不一致会「框比字小」，
+; 故建窗后按控件字体的实际行高(GetTextMetrics)精确设定覆盖窗高度，杜绝文字被裁剪。
+EditorTextCreateOverlay() {
+    global EditorTextEditGui, EditorTextEditBox, EditorTextPending
+    global EditorHwnd, EditorScale
+    global EDIT_TEXT_FONT, EDIT_TEXT_BG, EDIT_TEXT_PADDING
+    if IsObject(EditorTextEditGui)
+        return
+    fontSize := EditorTextPending.fontSize * EditorScale          ; 显示空间字号（px）
+    colorStr := Format("c{:06X}", EditorTextPending.color & 0xFFFFFF)
+    ; 编辑窗屏幕位置 + 锚点显示坐标 → 覆盖窗左上角
+    WinGetPos &wx, &wy, , , "ahk_id " EditorHwnd
+    sx := Round(EditorTextPending.x1 * EditorScale) + wx
+    sy := Round(EditorTextPending.y1 * EditorScale) + wy
+    pad := Round(EDIT_TEXT_PADDING * EditorScale)
+    initW := Max(140, Round(fontSize * 8) + pad * 2)              ; 单行初始宽度：约 8 倍字号 + padding
+    eg := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
+    eg.MarginX := 0, eg.MarginY := 0
+    eg.BackColor := EDIT_TEXT_BG
+    box := eg.Add("Edit", "Background" EDIT_TEXT_BG " " colorStr) ; 单行输入（Enter 提交）
+    box.SetFont("s" Round(fontSize * 0.75), EDIT_TEXT_FONT)       ; Edit 字号用 pt 近似（72/96 折算）
+    EditorTextEditBox := box
+    EditorTextEditGui := eg
+    boxH_tmp := Max(Round(fontSize * 1.6) + 8, 40)
+    eg.Show("NA Hide x" sx " y" sy " w" initW " h" boxH_tmp)  ; 强制创建控件（隐藏），此后 box.Hwnd 有效
+    ; 精确度量该字体实际像素行高（pt 随 DPI 缩放，用 GetTextMetrics 取值），量不到则按字号估算兜底
+    lineH := EditorTextMeasureLineHeight(box.Hwnd)
+    if (lineH <= 0)
+        lineH := Round(fontSize * 1.6)
+    boxH := lineH + Max(6, pad * 2)                               ; 高度 = 行高 + 上下留白
+    box.Move(0, 0, initW, boxH)
+    eg.Move(sx, sy, initW, boxH)
+    eg.Show("NA")
+    OnMessage(0x100, EditorTextKey)          ; WM_KEYDOWN：捕捉 Enter 提交
+    OnMessage(0x0008, EditorTextKillFocus)   ; WM_KILLFOCUS：点击其他处（编辑窗/工具栏/外部窗口）→ 直接提交确认
+    box.Focus()
+}
+
+; 测量控件字体的实际像素行高（tmHeight + tmExternalLeading）；失败返回 0 由调用方兜底
+EditorTextMeasureLineHeight(ctrlHwnd) {
+    lineH := 0
+    try {
+        hFont := SendMessage(0x0031, 0, 0, , "ahk_id " ctrlHwnd)  ; WM_GETFONT：取控件当前字体
+        if hFont {
+            hdc := DllCall("GetDC", "Ptr", ctrlHwnd, "Ptr")
+            if hdc {
+                hOld := DllCall("SelectObject", "Ptr", hdc, "Ptr", hFont, "Ptr")
+                m := Buffer(64)
+                if DllCall("GetTextMetricsW", "Ptr", hdc, "Ptr", m) {
+                    tmHeight := NumGet(m, 0, "Int")    ; tmHeight
+                    tmExtLead := NumGet(m, 16, "Int")  ; tmExternalLeading
+                    lineH := tmHeight + tmExtLead
+                }
+                DllCall("SelectObject", "Ptr", hdc, "Ptr", hOld, "Ptr")
+                DllCall("ReleaseDC", "Ptr", ctrlHwnd, "Ptr", hdc)
+            }
+        }
+    }
+    return lineH
+}
+
+; WM_KILLFOCUS：输入框失焦（点编辑窗/工具栏/任意外部窗口）＝ 点击其他地方 → 直接提交确认退出输入
+; 延迟一拍提交，避免窗口消息处理中同步销毁本控件窗口引发问题；提交语义见 EditorTextCommit
+EditorTextKillFocus(wParam, lParam, msg, hwnd) {
+    global EditorTextEditBox, EditorTextCommitting
+    if EditorTextCommitting
+        return 0
+    if IsObject(EditorTextEditBox) && (hwnd = EditorTextEditBox.Hwnd)
+        SetTimer EditorTextCommit, -10
+    return 0
+}
+
+; WM_KEYDOWN 分发：仅当焦点在输入覆盖窗 Edit 时，Enter 触发提交（OnEvent(KeyDown) 在分层场景注册报错，改走消息钩子）
+EditorTextKey(wParam, lParam, msg, hwnd) {
+    global EditorTextEditBox
+    if (wParam = 0x0D) {   ; VK_RETURN
+        hFocus := DllCall("GetFocus", "Ptr")
+        if (IsObject(EditorTextEditBox) && hFocus = EditorTextEditBox.Hwnd) {
+            EditorTextCommit()
+            return 1   ; 消费 Enter，避免系统默认行为
+        }
+    }
+    return ""
+}
+
+; 提交当前文本输入：非空 → 生成 text 标注并入标注层渲染；空文本则取消
+EditorTextCommit() {
+    global EditorTextEditGui, EditorTextEditBox, EditorTextPending
+    global EditorAnnotations
+    if !IsObject(EditorTextEditGui)
+        return
+    text := ""
+    try text := EditorTextEditBox.Text
+    pend := EditorTextPending
+    EditorTextEnd()   ; 先销毁覆盖窗/注销消息（含清空 pending）
+    if text = "" || !IsObject(pend)
+        return
+    pend.text := text
+    EditorAnnotations.Push(pend)
+    EditorAppendAnnotationToLayer(pend)
+    EditorRender()
+}
+
+; 取消当前文本输入（丢弃，不产生标注）
+EditorTextCancel() {
+    EditorTextEnd()
+}
+
+; 结束文本输入会话：销毁覆盖窗、注销消息、清空 pending（幂等）
+EditorTextEnd() {
+    global EditorTextEditGui, EditorTextEditBox, EditorTextPending, EditorTextCommitting
+    EditorTextCommitting := true   ; 销毁窗口会触发 WM_KILLFOCUS，置位拦截避免二次提交
+    if IsObject(EditorTextEditGui) {
+        try EditorTextEditGui.Destroy()
+        OnMessage(0x100, EditorTextKey, 0)
+        OnMessage(0x0008, EditorTextKillFocus, 0)
+    }
+    EditorTextEditGui := 0
+    EditorTextEditBox := 0
+    EditorTextPending := 0
+    EditorTextCommitting := false
+    EditorRefreshCursor()   ; 覆盖窗销毁后可能残留 I 形/旧光标，主动恢复到当前工具光标，防「鼠标偶发消失」
+}
+
+; 刷新当前工具对应光标：画笔/马赛克用小圆圈，其余用标准箭头
+; （文本输入框等临时窗口销毁后系统可能不自动复位光标，需主动重设）
+EditorRefreshCursor() {
+    global EditorTool
+    if (EditorTool = "brush" || EditorTool = "mosaic")
+        EditorApplyCircleCursor()
+    else
+        DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32512))  ; IDC_ARROW=32512 标准箭头
+}
+
+; ------------------------------------------------------------------
 ; 悬浮工具栏（置于编辑窗下方）
 ; ------------------------------------------------------------------
 EditorCreateToolbar() {
@@ -766,7 +1016,7 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
     ; 工具按钮区（PixPin 风格：矩形 / 箭头 / 椭圆 / 马赛克，选中态由 EditorToolbarRefresh 刷新）
     ; 点击行为由 ToolbarPhase 分流：选区阶段=选工具+自动选第1色+进入编辑；编辑阶段=仅切工具
     ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克 ✎画笔）
-    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["▦", "mosaic", "马赛克"], ["✎", "brush", "画笔"]]
+    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["T", "text", "文本"], ["▦", "mosaic", "马赛克"], ["✎", "brush", "画笔"]]
     for t in tools {
         c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", ToolbarToolClick.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c
@@ -817,6 +1067,8 @@ ScreenToolbarCreateRow2() {
         EditorSwatchFrames.Push(pair[1])
         EditorColorSwatches.Push(pair[2])
     }
+    ; 颜色块组与笔触粗细组之间的分隔线（组间边界，与工具行/输出组节奏一致）
+    ToolbarSeparator(ctb)
     ; 三档粗细图标（细/中/粗）：结构与色块一致（外框 30×30 + 内块 26×26 盖中心形成 2px 环），
     ; 内块中央 ● 圆点表示线宽档位（字号 8/11/15 对应细/中/粗）；选中态外框白环（同色块），点击切换线宽档位
     for i, w in EDIT_LINE_WIDTHS {
@@ -944,13 +1196,17 @@ ToolbarToolClick(name, *) {
         ScreenToolbarResult := "editor"
         return
     }
+    ; 文本输入会话期间点击工具 = 先提交当前文本再切换工具
+    if EditorTextSessionActive()
+        EditorTextCommit()
     EditorTool := name
     EditorToolbarRefresh()
-    ; 切到画笔/马赛克立刻应用圆环光标；其他工具恢复系统默认（鼠标静止时 WM_SETCURSOR 不触发，需主动刷新）
+    ; 切到画笔/马赛克立刻应用圆环光标；其他工具恢复标准箭头（鼠标静止时 WM_SETCURSOR 不触发，需主动刷新；
+    ; 注意不可用 SetCursor(NULL)——NULL 会把光标隐藏直到下次 WM_SETCURSOR，表现为「鼠标偶发被遮挡」）
     if (name = "brush" || name = "mosaic")
         EditorApplyCircleCursor()
     else
-        DllCall("SetCursor", "Ptr", 0)
+        DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32512))  ; IDC_ARROW=32512 标准箭头
 }
 
 ; 输出按钮：选区阶段 = 写结果给选区调度；编辑阶段 = 转发编辑器动作
@@ -960,6 +1216,9 @@ ToolbarOutputClick(action, *) {
         ScreenToolbarResult := action
         return
     }
+    ; 输出前先提交进行中的文本输入，确保其被纳入保存/复制/钉屏
+    if EditorTextSessionActive()
+        EditorTextCommit()
     switch action {
         case "save": EditorSave()
         case "pin": EditorPin()
@@ -1031,6 +1290,9 @@ EditorSetPenWidth(idx, *) {
 
 EditorClear(*) {
     global EditorAnnotations
+    ; 清除前先提交进行中的文本输入（随后一并被清空）
+    if EditorTextSessionActive()
+        EditorTextCommit()
     for ann in EditorAnnotations
         EditorReleaseAnnotationCache(ann)  ; 逐个释放马赛克缓存
     EditorAnnotations := []
@@ -1171,6 +1433,7 @@ EditorCleanup() {
     global EditorGui, EditorHwnd, EditorWorkBitmap, EditorBaseBitmap
     global EditorPending, EditorResult, EditorAnnotations, EditorBgBitmap, EditorBgBase
     global EditorCircleCursor
+    EditorTextEnd()   ; 防御：若存在未结束的文本输入会话，销毁覆盖窗并注销消息
     EditorCloseOverlays()
     EditorOverlayCleanup()
     if EditorGui {
