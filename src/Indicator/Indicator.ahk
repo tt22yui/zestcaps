@@ -13,6 +13,9 @@ global IND_TEXT_A, IND_COLOR_A, IND_BG_A
 CoordMode "Mouse", "Screen"
 
 ; 创建指示器 GUI
+; 注意：基础样式【不加】WS_EX_LAYERED —— 分层窗在 DWM 下每次位移都逐帧合成，跟随会卡/拖影。
+; 仅淡入淡出瞬间由 WinSetTransparent 临时上分层，完成后 Off 还原为普通窗（位移最平滑）。
+; +E0x20(WS_EX_TRANSPARENT) 鼠标穿透  +E0x08000000(WS_EX_NOACTIVATE) 不抢焦点
 IndGUI := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x08000000 +Border")
 IndGUI.SetFont(IND_FONT_SIZE " " IND_FONT_WEIGHT, IND_FONT_NAME)
 IndGUI.MarginX := 0, IndGUI.MarginY := 0
@@ -25,6 +28,8 @@ global indicatorBriefShow := false
 
 ; 启动定时器，让指示器跟随鼠标（仅功能开启时启动，避免禁用时空转）
 if IndicatorEnabled {
+    ; 提高系统定时器时钟分辨率为 1ms，让 10ms 周期的位置刷新真正达标（顺滑需要；会轻微增加 CPU 耗电）
+    DllCall("winmm\timeBeginPeriod", "uint", 1)
     SetTimer _UpdateIndicator, IND_UPDATE_INTERVAL
     _UpdateIndicator()
 }
@@ -126,17 +131,84 @@ _UpdateIndicator() {
         MouseGetPos &mx, &my
         mx += IND_OFFSET_X
         my += IND_OFFSET_Y
-        ; 移动超过 2px 或从隐藏→显示时才重新定位
-        if !prevVisible || Abs(mx - prevX) >= 2 || Abs(my - prevY) >= 2 {
-            IndGUI.Show("x" mx " y" my " w" IND_WIDTH " h" IND_HEIGHT " NoActivate")
+        if !prevVisible {
+            ; 隐藏→显示：透明度先归零再显示并淡入，避免出现一闪而过的实心框
+            SetIndicatorAlpha(0)
+            MoveIndicator(mx, my)
+            IndGUI.Show("NoActivate")
+            StartIndicatorFade(true)
+            prevX := mx
+            prevY := my
+            prevVisible := true
+        } else if (mx != prevX || my != prevY) {
+            ; 已显示：坐标有任何变化即移动（无死区、不缩放，纯位移最平滑）
+            MoveIndicator(mx, my)
             prevX := mx
             prevY := my
         }
-        prevVisible := true
     } else {
         if prevVisible {
-            IndGUI.Hide()
+            StartIndicatorFade(false)   ; 触发淡出，完成后由淡出回调隐藏窗口
             prevVisible := false
+        }
+    }
+}
+
+; ==================================================================
+; 淡入淡出控制（分层窗口透明度动画）
+; ==================================================================
+global indAlpha := 0          ; 当前窗口透明度 0-255
+global indFadeHide := false   ; 本次淡出完成后是否需要隐藏窗口
+
+; 设置窗口透明度：用 WinSetTransparent 自动管理 WS_EX_LAYERED（设数值即临时上分层，Off 还原普通窗）。
+; 这样跟随阶段保持普通窗口位移最平滑，仅在淡入淡出瞬间才处于分层态。
+SetIndicatorAlpha(alpha) {
+    WinSetTransparent(alpha, IndGUI)
+}
+
+; 仅移动指示器窗口到(x,y)：用 SetWindowPos 纯位移，不缩放(NOSIZE)、不抢焦点(NOACTIVATE)、
+; 不改层级(NOZORDER)。避免像 WinMove 那样按外框尺寸重设导致内容被裁剪/每次重排卡顿。
+MoveIndicator(x, y) {
+    static hwnd := 0
+    if !hwnd
+        hwnd := IndGUI.Hwnd
+    ; flags = SWP_NOSIZE(0x1)|SWP_NOZORDER(0x4)|SWP_NOACTIVATE(0x10) = 0x15
+    DllCall("user32\SetWindowPos", "ptr", hwnd, "ptr", 0, "int", x, "int", y, "int", 0, "int", 0, "uint", 0x15)
+}
+
+; 启动一次淡入(toShow=true)或淡出(toShow=false)
+StartIndicatorFade(toShow) {
+    global indFadeHide, IND_FADE_PERIOD
+    indFadeHide := !toShow
+    SetTimer _IndicatorFadeStep, IND_FADE_PERIOD
+}
+
+; 透明度步进：按周期推进 alpha，到达边界即停止（淡出结束时隐藏窗口）
+_IndicatorFadeStep() {
+    global indAlpha, indFadeHide
+    global IND_FADE_IN_MS, IND_FADE_OUT_MS, IND_FADE_PERIOD
+    if indFadeHide {
+        step := Ceil(255 * IND_FADE_PERIOD / IND_FADE_OUT_MS)
+        indAlpha -= step
+        if indAlpha <= 0 {
+            indAlpha := 0
+            SetIndicatorAlpha(indAlpha)
+            SetTimer _IndicatorFadeStep, 0
+            IndGUI.Hide()
+            WinSetTransparent("Off", IndGUI)   ; 淡出完成：隐藏并还原为普通窗，供下次平滑跟随
+        } else {
+            SetIndicatorAlpha(indAlpha)
+        }
+    } else {
+        step := Ceil(255 * IND_FADE_PERIOD / IND_FADE_IN_MS)
+        indAlpha += step
+        if indAlpha >= 255 {
+            indAlpha := 255
+            SetIndicatorAlpha(indAlpha)
+            SetTimer _IndicatorFadeStep, 0
+            WinSetTransparent("Off", IndGUI)   ; 淡入完成：还原为普通窗，位移不再走合成器
+        } else {
+            SetIndicatorAlpha(indAlpha)
         }
     }
 }

@@ -51,12 +51,15 @@ HOTKEY_FORMAT_HINT := "格式：^=Ctrl； +=Shift； !=Alt； #=Win"
 ; ==================================================================
 ; 输入状态指示器参数（硬编码）
 ; ==================================================================
-IND_UPDATE_INTERVAL     := 80                ; 指示器位置刷新间隔（毫秒）
+IND_UPDATE_INTERVAL     := 10                ; 指示器位置刷新间隔（毫秒），~60Hz 才接近实时、跟手；光标不动时短路零开销
 IND_WIDTH               := 28                ; 指示器窗口宽度（像素）
 IND_HEIGHT              := 24                ; 指示器窗口高度（像素）
 IND_OFFSET_X            := 16                ; 相对鼠标光标的水平偏移（像素）
 IND_OFFSET_Y            := 20                ; 相对鼠标光标的垂直偏移（像素）
 IND_BRIEF_SHOW_DURATION := 1000              ; 按 CapsLock 后强制显示时长（毫秒），超时后按光标类型决定
+IND_FADE_IN_MS          := 150               ; 指示器淡入时长（毫秒）
+IND_FADE_OUT_MS         := 130               ; 指示器淡出时长（毫秒）
+IND_FADE_PERIOD         := 15                ; 淡入淡出透明度步进周期（毫秒）
 IND_FONT_SIZE           := "s9"              ; 字体大小（AHK 格式：s+数字）
 IND_FONT_WEIGHT         := "w700"            ; 字体粗细（w400=正常 w700=加粗）
 IND_FONT_NAME           := "Microsoft YaHei" ; 字体名称
