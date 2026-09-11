@@ -44,11 +44,36 @@ jobs:
           # 覆盖 src\Main.ahk 的完整 #Include 链：能拦住「某模块语法坏了但单测没引用到」的情况。
           # 入口按 #Warn All, StdOut 打开全量告警（实测当前全链路零告警），
           # 任何告警都会落到下方「有输出即失败」分支：拼错变量名、局部与全局同名、不可达代码等都能拦住。
-          $out = & $env:AHK_BASE /validate /ErrorStdOut test\Load\validate_main.ahk 2>&1
-          $code = $LASTEXITCODE
-          if ($out) { $out | ForEach-Object { Write-Host $_ } }
-          if ($code -ne 0) { Write-Error "全链路语法校验失败，退出码=$code"; exit $code }
-          if ($out) { Write-Error "全链路语法校验有输出（告警/错误），详见上方"; exit 1 }
+          #
+          # 调用方式必须用 Start-Process -Wait -PassThru：
+          # AHK 是 GUI 子系统程序，在 PowerShell 7 上用 `& $exe` 调用时 $LASTEXITCODE 取不到值
+          # （表现为「退出码=」为空、失败原因被误报成「校验失败」）——v0.3.4 首次发布即栽在这里，
+          # 与仓库既有教训「用 & 调 AutoHotkey64.exe 拿不到退出码」是同一个坑。
+          # 解析解释器：优先用上一步写入的 AHK_BASE，取不到就现场搜索便携 ZIP 解压目录（避免跨步骤耦合）
+          $ahk = $env:AHK_BASE
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            $found = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ahk = $found.FullName }
+          }
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            Write-Host "AHK_BASE=[$env:AHK_BASE]；在 $env:RUNNER_TEMP\ahk 下也未找到 AutoHotkey64.exe"
+            Write-Host "无法执行语法校验"
+            exit 1
+          }
+          Write-Host "解释器: $ahk"
+          $vOut = Join-Path $env:RUNNER_TEMP "validate_out.log"
+          $vErr = Join-Path $env:RUNNER_TEMP "validate_err.log"
+          $p = Start-Process -FilePath $ahk -ArgumentList @("/validate", "/ErrorStdOut", "test\Load\validate_main.ahk") -Wait -PassThru -RedirectStandardOutput $vOut -RedirectStandardError $vErr
+          $code = $p.ExitCode
+          $text = ""
+          if (Test-Path $vOut) { $text += (Get-Content $vOut -Raw) }
+          if (Test-Path $vErr) { $text += (Get-Content $vErr -Raw) }
+          $text = "$text".Trim()
+          if ($text) { $text | ForEach-Object { Write-Host $_ } }
+          Write-Host "语法校验退出码=$code"
+          if ($null -eq $code) { Write-Host "未取到退出码（进程未正常启动？）"; exit 1 }
+          if ($code -ne 0) { Write-Host "全链路语法校验失败，退出码=$code"; exit 1 }
+          if ($text) { Write-Host "全链路语法校验有告警/错误输出（见上）"; exit 1 }
           Write-Host "全链路语法校验通过"
 
       - name: 运行聚合测试（失败则中止发布）
@@ -56,8 +81,14 @@ jobs:
         run: |
           # GUI 程序用 & 拿不到 $LASTEXITCODE，改用 Start-Process -PassThru 读退出码；
           # 同时把子进程 stdout 落文件再回显，否则失败时日志里只有一行退出码，看不到是哪个模块挂了
+          $ahk = $env:AHK_BASE
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            $found = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ahk = $found.FullName }
+          }
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) { Write-Host "未找到 AutoHotkey64.exe"; exit 1 }
           $log = Join-Path $env:RUNNER_TEMP "unit_tests.log"
-          $p = Start-Process -FilePath $env:AHK_BASE -ArgumentList "test\run_all_tests.ahk" -Wait -PassThru -RedirectStandardOutput $log
+          $p = Start-Process -FilePath $ahk -ArgumentList "test\run_all_tests.ahk" -Wait -PassThru -RedirectStandardOutput $log
           $testExit = $p.ExitCode
           if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } }
           Write-Host "测试退出码=$testExit"
@@ -143,21 +174,41 @@ jobs:
           # 复用第 2 步下载的官方 Zip 内的 Compiler\Ahk2Exe.exe：
           # 第三方编译 action 会直接产出分发给用户的 exe，风险过高（且需把 GITHUB_TOKEN 交给外部代码）。
           # 兼容两种目录布局：ZIP 便携版（Compiler 与 AutoHotkey64.exe 同级）与安装版（AutoHotkey64.exe 在 v2\ 下）
-          $ahkRoot = Split-Path $env:AHK_BASE -Parent
+          # 解析解释器（同上：不依赖跨步骤环境变量，取不到就现场搜索）
+          $ahk = $env:AHK_BASE
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            $found = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ahk = $found.FullName }
+          }
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) { Write-Host "未找到 AutoHotkey64.exe"; exit 1 }
+          $ahkRoot = Split-Path $ahk -Parent
           $candidates = @(
             (Join-Path $ahkRoot "Compiler\Ahk2Exe.exe"),
             (Join-Path (Split-Path $ahkRoot -Parent) "Compiler\Ahk2Exe.exe")
           )
           $ahk2exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $ahk2exe) { throw "未找到 Ahk2Exe.exe，已尝试：$($candidates -join ' ; ')" }
+          if (-not $ahk2exe) { Write-Host "未找到 Ahk2Exe.exe，已尝试：$($candidates -join ' ; ')"; exit 1 }
           $ver = "${{ steps.version.outputs.version }}"
           $out = "output\zestcaps_v$ver.exe"
           Write-Host "Compiler: $ahk2exe"
-          Write-Host "Base    : $env:AHK_BASE"
+          Write-Host "Base    : $ahk"
           Write-Host "Output  : $out"
-          & $ahk2exe /silent /in "src\Main.ahk" /out $out /icon "resources\capslock.ico" /base $env:AHK_BASE /compress 0
-          if ($LASTEXITCODE -ne 0) { throw "Ahk2Exe 编译失败，退出码=$LASTEXITCODE" }
-          if (-not (Test-Path $out)) { throw "编译未生成产物: $out" }
+          # 同前：Ahk2Exe 也是 GUI 子系统程序，必须用 Start-Process 读真实退出码
+          # （`& $ahk2exe` 在 PowerShell 7 上 $LASTEXITCODE 取不到值，会把成功误判成失败）；
+          # 数组形式的 -ArgumentList 不会自动加引号，故路径参数自行加引号，防安装路径含空格
+          $cOut = Join-Path $env:RUNNER_TEMP "ahk2exe_out.log"
+          $cErr = Join-Path $env:RUNNER_TEMP "ahk2exe_err.log"
+          $proc = Start-Process -FilePath $ahk2exe -ArgumentList @(
+            "/silent", "/in", "`"src\Main.ahk`"", "/out", "`"$out`"",
+            "/icon", "`"resources\capslock.ico`"", "/base", "`"$ahk`"", "/compress", "0"
+          ) -Wait -PassThru -RedirectStandardOutput $cOut -RedirectStandardError $cErr
+          $rc = $proc.ExitCode
+          if (Test-Path $cOut) { Get-Content $cOut | ForEach-Object { Write-Host $_ } }
+          if (Test-Path $cErr) { Get-Content $cErr | ForEach-Object { Write-Host $_ } }
+          Write-Host "Ahk2Exe 退出码=$rc"
+          if ($null -eq $rc) { Write-Host "未取到 Ahk2Exe 退出码（进程未正常启动？）"; exit 1 }
+          if ($rc -ne 0) { Write-Host "Ahk2Exe 编译失败，退出码=$rc"; exit 1 }
+          if (-not (Test-Path $out)) { Write-Host "编译未生成产物: $out"; exit 1 }
           Write-Host "编译完成: $out"
 
       - name: 校验产物存在
