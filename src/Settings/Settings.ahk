@@ -15,7 +15,11 @@
 ; ==================================================================
 
 ; 读取「时/分」两个 UpDown 编辑框，拼成 24 时制 "HH:mm"（补零）
+; 非数字输入返回空串，交由 ValidateRecycleBin 报错：整数转换对非数字会抛异常，
+; 而本函数在保存流程里先于 try 执行，裸抛会被全局兜底吞掉（界面表现为「点保存没反应」）
 ReadRBTime(hourEdit, minEdit) {
+    if !IsNumber(hourEdit.Value) || !IsNumber(minEdit.Value)
+        return ""
     return Format("{:02}:{:02}", Integer(hourEdit.Value), Integer(minEdit.Value))
 }
 
@@ -30,8 +34,14 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
         MsgBox err, "设置", "IconX"
         return
     }
-    ; 回收站参数校验（清空时刻格式 / 保留天数合法性）
-    err := ValidateRecycleBin(editKeepDays.Value, ReadRBTime(editTimeHour, editTimeMin))
+    ; 回收站参数校验（清空时刻格式与范围 / 保留天数合法性）
+    ; 包 try：保留天数与时刻来自可自由键入的控件，非数字时整数转换会抛异常；
+    ; 不包的话异常会被全局兜底吞掉，用户点「保存并重启」将毫无反应也无提示
+    try {
+        err := ValidateRecycleBin(editKeepDays.Value, ReadRBTime(editTimeHour, editTimeMin))
+    } catch as e {
+        err := "保留天数 / 执行时刻需填写有效数字（" e.Message "）"
+    }
     if err != "" {
         MsgBox err, "设置", "IconX"
         return
@@ -66,15 +76,18 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
     RestartScript()
 }
 
-; 校验「定时清空回收站」参数：每日清空时刻 HH:mm 格式 + 保留天数 ≥ 1；合法返回空串，非法返回错误信息
+; 校验「定时清空回收站」参数：每日清空时刻 HH:mm（含 0-23 / 0-59 范围校验）+ 保留天数 ≥ 1
+; 合法返回空串，非法返回错误信息
 ValidateRecycleBin(keepDays, time) {
-    if !RegExMatch(time, "^\d{1,2}:\d{2}$")
+    if !RegExMatch(time, "^(\d{1,2}):(\d{2})$", &m)
         return "清空时刻格式错误，请用 24 小时制 HH:mm（如 12:30）"
-    try {
-        if Integer(keepDays) < 1
-            return "保留天数需至少为 1 天"
-    } catch
+    ; 仅校验格式无法拦截 99:99，超出范围会排出错误的定时（RecycleBin.ahk 按字符串拼接执行时刻）
+    if (Integer(m[1]) > 23 || Integer(m[2]) > 59)
+        return "清空时刻超出范围，请填写 00:00 - 23:59"
+    if !IsNumber(keepDays)
         return "保留天数需为数字"
+    if Integer(keepDays) < 1
+        return "保留天数需至少为 1 天"
     return ""
 }
 

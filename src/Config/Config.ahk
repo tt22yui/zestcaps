@@ -22,16 +22,8 @@ APP_GITHUB_API_URL := "https://api.github.com/repos/" APP_GITHUB_OWNER "/" APP_G
 ; ==================================================================
 
 ; 配置文件不存在时自动创建（仅写入菜单开关状态）
-if !FileExist(CONFIG_FILE) {
-    IniWrite 1, CONFIG_FILE, "Indicator", "IndicatorEnabled"
-    IniWrite 1, CONFIG_FILE, "Features", "PastePlainEnabled"
-    IniWrite 1, CONFIG_FILE, "Features", "ScreenshotEnabled"
-    IniWrite 0, CONFIG_FILE, "Features", "StartupEnabled"
-    IniWrite 0, CONFIG_FILE, "Features", "DesktopShortcutEnabled"
-    IniWrite 1, CONFIG_FILE, "Features", "SplashEnabled"
-    IniWrite 0, CONFIG_FILE, "Features", "RecycleBinEnabled"
-    IniWrite 1, CONFIG_FILE, "Features", "AutoUpdateEnabled"
-}
+; 注意：创建动作刻意放在本文件末尾——本文件在 GlobalError / DebugLog 注册之前加载，
+;       早期执行的文件 I/O 一旦抛异常会弹模态错误框并中断整个脚本启动（见文件末尾同名段落）
 
 ; ==================================================================
 ; 托盘菜单文字（硬编码）
@@ -51,7 +43,7 @@ HOTKEY_FORMAT_HINT := "格式：^=Ctrl； +=Shift； !=Alt； #=Win"
 ; ==================================================================
 ; 输入状态指示器参数（硬编码）
 ; ==================================================================
-IND_UPDATE_INTERVAL     := 10                ; 指示器位置刷新间隔（毫秒），~60Hz 才接近实时、跟手；光标不动时短路零开销
+IND_UPDATE_INTERVAL     := 10                ; 指示器位置刷新间隔（毫秒），10ms≈100Hz 才跟手；鼠标位置未变化时跳过窗口位移（IME 检测每拍仍会执行）
 IND_WIDTH               := 28                ; 指示器窗口宽度（像素）
 IND_HEIGHT              := 24                ; 指示器窗口高度（像素）
 IND_OFFSET_X            := 16                ; 相对鼠标光标的水平偏移（像素）
@@ -90,21 +82,22 @@ CAPS_WATCHDOG_INTERVAL_MS   := 2000  ; 看门狗检测周期（毫秒）
 ; ==================================================================
 ; 功能开关初始状态（从 config.ini 读取，设置窗口保存时自动写回）
 ; ==================================================================
-IndicatorEnabled        := IniRead(CONFIG_FILE, "Indicator", "IndicatorEnabled", 1) = "1"            ; 鼠标输入状态指示器：1=开 0=关
-PastePlainEnabled       := IniRead(CONFIG_FILE, "Features", "PastePlainEnabled", 1) = "1"            ; 纯文本粘贴（默认 Ctrl+Shift+V，热键可配置）：1=开 0=关
-ScreenshotEnabled       := IniRead(CONFIG_FILE, "Features", "ScreenshotEnabled", 1) = "1"            ; 简单截图（默认 F1，热键可配置）：1=开 0=关
-StartupEnabled          := IniRead(CONFIG_FILE, "Features", "StartupEnabled", 0) = "1"                ; 开机自动启动：1=开 0=关（默认关）
-DesktopShortcutEnabled  := IniRead(CONFIG_FILE, "Features", "DesktopShortcutEnabled", 0) = "1"          ; 桌面快捷方式：1=创建 0=不创建（默认关）
-SplashEnabled           := IniRead(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
-RecycleBinEnabled       := IniRead(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
-AutoUpdateEnabled       := IniRead(CONFIG_FILE, "Features", "AutoUpdateEnabled", 1) = "1"             ; 自动检查更新：1=开 0=关（默认开，仅编译版生效）
+IndicatorEnabled        := IniReadText(CONFIG_FILE, "Indicator", "IndicatorEnabled", 1) = "1"            ; 鼠标输入状态指示器：1=开 0=关
+PastePlainEnabled       := IniReadText(CONFIG_FILE, "Features", "PastePlainEnabled", 1) = "1"            ; 纯文本粘贴（默认 Ctrl+Shift+V，热键可配置）：1=开 0=关
+ScreenshotEnabled       := IniReadText(CONFIG_FILE, "Features", "ScreenshotEnabled", 1) = "1"            ; 简单截图（默认 F1，热键可配置）：1=开 0=关
+StartupEnabled          := IniReadText(CONFIG_FILE, "Features", "StartupEnabled", 0) = "1"                ; 开机自动启动：1=开 0=关（默认关）
+DesktopShortcutEnabled  := IniReadText(CONFIG_FILE, "Features", "DesktopShortcutEnabled", 0) = "1"          ; 桌面快捷方式：1=创建 0=不创建（默认关）
+SplashEnabled           := IniReadText(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
+RecycleBinEnabled       := IniReadText(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
+AutoUpdateEnabled       := IniReadText(CONFIG_FILE, "Features", "AutoUpdateEnabled", 1) = "1"             ; 自动检查更新：1=开 0=关（默认开，仅编译版生效）
 ; ==================================================================
 ; 定时清空回收站参数（KeepDays/Time 由设置页保存到 config.ini 的 [RecycleBin] 段）
 ; ==================================================================
 RB_DEFAULT_KEEP_DAYS    := 30                                         ; 默认保留天数：删除超过 N 天才清空
 RB_DEFAULT_TIME         := "12:00"                                    ; 默认每日执行时刻（HH:mm，24 小时制）
-RecycleBinKeepDays      := Integer(IniRead(CONFIG_FILE, "RecycleBin", "KeepDays", RB_DEFAULT_KEEP_DAYS))  ; 保留天数（设置页可调）
-RecycleBinTime          := IniRead(CONFIG_FILE, "RecycleBin", "Time", RB_DEFAULT_TIME)  ; 每日执行时刻 HH:mm（设置页可调）
+; 保留天数/执行时刻均走兜底读取：手改 ini 写成 abc / 9:05 / 空值都不会再让启动失败
+RecycleBinKeepDays      := IniReadInt(CONFIG_FILE, "RecycleBin", "KeepDays", RB_DEFAULT_KEEP_DAYS)  ; 保留天数（设置页可调）
+RecycleBinTime          := NormalizeClockTime(IniReadText(CONFIG_FILE, "RecycleBin", "Time", RB_DEFAULT_TIME), RB_DEFAULT_TIME)  ; 每日执行时刻 HH:mm（设置页可调）
 ; 模块内引用名（RB* 前缀）读取自 config.ini
 RBKeepDays              := RecycleBinKeepDays
 RBTime                  := RecycleBinTime
@@ -217,4 +210,68 @@ SPLASH_FONT_CJK     := "Microsoft YaHei"   ; 副标题/芯片字体（中文）
 DEBUG_LOG_ENABLED     := true
 DEBUG_LOG_FILE        := A_ScriptDir "\Log\capslock_debug.log"
 DEBUG_LOG_MAX_SIZE_KB := 800
+; ==================================================================
+
+; ==================================================================
+; 配置读取工具
+; 本文件在 GlobalError 注册之前加载，故所有 ini 读取必须自行兜底：
+; IniRead 在文件不可读时、Integer() 在值非数字时都会抛异常，
+; 一旦抛出即弹模态错误框并中断整个脚本启动（托盘/热键全部失效），必须在此层拦截
+; ==================================================================
+
+; 读取整数配置项：缺失 / 空值 / 非数字 / 读取异常均回退到 fallback
+IniReadInt(filename, section, key, fallback) {
+    try {
+        raw := IniRead(filename, section, key, fallback)
+        if IsNumber(raw)
+            return Integer(raw)
+    }
+    return Integer(fallback)
+}
+
+; 读取文本配置项：缺失 / 空值 / 读取异常均回退到 fallback
+IniReadText(filename, section, key, fallback) {
+    try {
+        raw := IniRead(filename, section, key, fallback)
+        if raw != ""
+            return raw
+    }
+    return fallback
+}
+
+; 规范化每日执行时刻为补零的 "HH:mm"（兼容 "9:05" 这类写法）；非法值回退默认值
+NormalizeClockTime(raw, fallback) {
+    try {
+        if RegExMatch(raw, "^(\d{1,2}):(\d{1,2})$", &m) {
+            hour := Integer(m[1]), minute := Integer(m[2])
+            if (hour <= 23 && minute <= 59)
+                return Format("{:02}:{:02}", hour, minute)
+        }
+    }
+    return fallback
+}
+; ==================================================================
+
+; ==================================================================
+; 首次运行自动创建 config.ini（写入默认开关状态）
+; 刻意放在文件末尾：此时 DEBUG_LOG_FILE 已就绪，失败可尽力写日志；
+; 且整体 try 兜底——程序目录只读（装在 Program Files、只读介质）时
+; 不应连带整个脚本启动失败，缺配置时上方 IniRead* 会自然使用内置默认值
+; ==================================================================
+if !FileExist(CONFIG_FILE) {
+    try {
+        IniWrite 1, CONFIG_FILE, "Indicator", "IndicatorEnabled"
+        IniWrite 1, CONFIG_FILE, "Features", "PastePlainEnabled"
+        IniWrite 1, CONFIG_FILE, "Features", "ScreenshotEnabled"
+        IniWrite 0, CONFIG_FILE, "Features", "StartupEnabled"
+        IniWrite 0, CONFIG_FILE, "Features", "DesktopShortcutEnabled"
+        IniWrite 1, CONFIG_FILE, "Features", "SplashEnabled"
+        IniWrite 0, CONFIG_FILE, "Features", "RecycleBinEnabled"
+        IniWrite 1, CONFIG_FILE, "Features", "AutoUpdateEnabled"
+    } catch as configErr {
+        ; 变量名刻意不用 err：顶层（自动执行段）赋值会创建全局 err，
+        ; 使各处函数内 `catch as err` 被 #Warn LocalSameAsGlobal 判为「局部与全局同名」而刷告警
+        DebugLog("配置: 创建 config.ini 失败（本次使用内置默认值运行）- " configErr.Message)
+    }
+}
 ; ==================================================================
