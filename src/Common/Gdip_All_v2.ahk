@@ -1741,9 +1741,11 @@ Gdip_GetDimensions(pBitmap, &Width, &Height)
 
 Gdip_GetImagePixelFormat(pBitmap)
 {
-	Format := 0
-	DllCall("gdiplus\GdipGetImagePixelFormat", A_PtrSize ? "UPtr" : "UInt", pBitmap, A_PtrSize ? "UPtr*" : "UInt*", &Format)
-	return Format
+	; 本地改动（非上游代码）：局部变量由 Format 改为 pixFmt —— 与内置 Format() 同名会触发
+	; #Warn LocalSameAsGlobal 告警，挡住「零告警」全链路门禁；重新引入上游版本时需再次改名
+	pixFmt := 0
+	DllCall("gdiplus\GdipGetImagePixelFormat", A_PtrSize ? "UPtr" : "UInt", pBitmap, A_PtrSize ? "UPtr*" : "UInt*", &pixFmt)
+	return pixFmt
 }
 
 ;#####################################################################################
@@ -2954,25 +2956,27 @@ StrGetB(Address, Length:=-1, Encoding:=0)
 		; No conversion necessary, but we might not want the whole string.
 		if (Length == -1)
 			Length := DllCall("lstrlen", "uint", Address)
-		String := Buffer(Length)
-		DllCall("lstrcpyn", "str", String, "uint", Address, "int", Length + 1)
+		; 本地改动（非上游代码）：局部变量由 String 改为 strBuf —— 与内置类型名同名会触发
+		; #Warn LocalSameAsGlobal 告警，挡住「零告警」全链路门禁；重新引入上游版本时需再次改名
+		strBuf := Buffer(Length)
+		DllCall("lstrcpyn", "str", strBuf, "uint", Address, "int", Length + 1)
 	}
 	else if (Encoding = 1200) ; UTF-16
 	{
 		char_count := DllCall("WideCharToMultiByte", "uint", 0, "uint", 0x400, "uint", Address, "int", Length, "uint", 0, "uint", 0, "uint", 0, "uint", 0)
-		String := Buffer(char_count)
-		DllCall("WideCharToMultiByte", "uint", 0, "uint", 0x400, "uint", Address, "int", Length, "str", String, "int", char_count, "uint", 0, "uint", 0)
+		strBuf := Buffer(char_count)
+		DllCall("WideCharToMultiByte", "uint", 0, "uint", 0x400, "uint", Address, "int", Length, "str", strBuf, "int", char_count, "uint", 0, "uint", 0)
 	}
 	else if IsInteger(Encoding)
 	{
 		; Convert from target encoding to UTF-16 then to the active code page.
 		char_count := DllCall("MultiByteToWideChar", "uint", Encoding, "uint", 0, "uint", Address, "int", Length, "uint", 0, "int", 0)
-		String := Buffer(char_count * 2)
-		char_count := DllCall("MultiByteToWideChar", "uint", Encoding, "uint", 0, "uint", Address, "int", Length, "uint", String.Ptr, "int", char_count * 2)
-		String := StrGetB(&String, char_count, 1200)
+		strBuf := Buffer(char_count * 2)
+		char_count := DllCall("MultiByteToWideChar", "uint", Encoding, "uint", 0, "uint", Address, "int", Length, "uint", strBuf.Ptr, "int", char_count * 2)
+		strBuf := StrGetB(&strBuf, char_count, 1200)
 	}
 
-	return String
+	return strBuf
 }
 
 

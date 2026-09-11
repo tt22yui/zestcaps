@@ -54,8 +54,10 @@ if SplashEnabled {
 
             ; 脚本退出时确保释放 GDI+ 资源（OnExit 只接受函数对象，裸函数名即引用）
             OnExit(_SplashExit)
-        } catch as err {
-            DebugLog("闪屏: 初始化失败 - " err.Message " @" err.Line)
+        } catch as splashErr {
+            ; 变量名刻意不用 err：本段位于顶层（自动执行段），捕获变量会创建全局 err，
+            ; 使各处函数内 `catch as err` 被判为「局部与全局同名」并被 #Warn LocalSameAsGlobal 警告
+            DebugLog("闪屏: 初始化失败 - " splashErr.Message " @" splashErr.Line)
             _SplashCleanup()
         }
     }

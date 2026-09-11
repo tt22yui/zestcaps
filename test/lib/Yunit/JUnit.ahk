@@ -37,17 +37,19 @@ class YunitJUnit{
     ; 显式写出 JUnit XML。ExitApp 前必须调用，否则文件不落盘。
     WriteXml() {
         ; FileOpen 默认按系统 ANSI 编码写入，必须显式 UTF-8（无 BOM）以匹配 XML 声明
-        file := FileOpen(this.filename, "w", "UTF-8-RAW")
-        file.write('<?xml version="1.0" encoding="UTF-8"?>`n')
+        ; 本地适配：局部变量名用 f 而非 file —— 后者与内置 File 类同名，
+        ; 会在 #Warn All 下触发 LocalSameAsGlobal 告警（仅适配层改名，不动 Yunit 核心逻辑）
+        f := FileOpen(this.filename, "w", "UTF-8-RAW")
+        f.write('<?xml version="1.0" encoding="UTF-8"?>`n')
         msg := '<testsuites failures="' . this.tests.fail . '" tests="' . this.tests.overall . '">'
-        file.write(msg . "`n")
+        f.write(msg . "`n")
         msg := '`t<testsuite failures="' . this.tests.fail . '" tests="' . this.tests.overall . '" name="AHK_YUnit">'
-        file.write(msg . "`n")
+        f.write(msg . "`n")
         Loop this.out.Length
-            file.write(this.out[A_Index] . "`n")
-        file.write("`t</testsuite>`n")
-        file.write("</testsuites>`n")
-        file.close()
+            f.write(this.out[A_Index] . "`n")
+        f.write("`t</testsuite>`n")
+        f.write("</testsuites>`n")
+        f.close()
     }
 
     Update(Category, TestName, Result)
