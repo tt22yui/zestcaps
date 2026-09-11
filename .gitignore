@@ -1,43 +1,28 @@
-target/
-!.mvn/wrapper/maven-wrapper.jar
+# ==================================================================
+# ZestCaps 忽略规则（AutoHotkey 项目，无需 Java/Maven 模板段）
+# ==================================================================
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
+# 构建产物
+output/
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
-nbproject/private/
-build/
-nbbuild/
-dist/
-nbdist/
-.nb-gradle/
-log/*
-
-
-### vs code ##
-.vscode
-.vscode/private-folder-alias.json
-*.code-workspace
-
+# 运行期日志（src\Log\ 目录 + 任意 .log：含各测试目录下的 Log\）
 *.log
 src/Log/
 
-output/
+# 本地配置：各目录下的 config.ini 都是运行期生成/本地状态
+# （src\config.ini 由 Config.ahk 首次运行创建；test\**\config.ini 由测试生成）
 config.ini
+
+# 临时调试脚本与一次性探针（项目规则：永不提交，用完即删）
 tmp/
 
-# Yunit 单测产物（CI 收集用，不入仓库）
+# 单测产物（CI 收集用，不入仓库）
 **/junit_unit_*.xml
+junit.xml
 
+# CI 产物（Release 正文）
+release_body.md
 
+# 编辑器 / 工作区
+.vscode
+*.code-workspace
