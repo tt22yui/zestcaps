@@ -1,6 +1,8 @@
 # ZestCaps
 
-> v0.2.1 — [MIT License](LICENSE)
+> **简体中文 | [English](README.en.md)**
+
+> v0.3.3 — [MIT License](LICENSE)
 
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -56,6 +58,13 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 - 定时器为一次动态排程，仅在接近执行时刻前唤醒一次，空闲时零负载
 - 默认关闭
 
+### 8. GitHub 自动更新（仅编译版）
+
+- 设置「关于」页提供「检查更新」按钮与「启动时自动检查更新」开关，点击后异步查询 GitHub 最新 Release
+- 语义化版本比对 + SHA256 校验，确认后下载并延迟自动替换、重启
+- 基于运行文件的真实路径自我替换，exe 改名也能正常更新
+- 仅编译为 exe 后生效；源码运行会提示不可用
+
 ## 输入法检测原理
 
 ```text
@@ -97,6 +106,8 @@ src\
 │   └── Hotkeys.ahk     可配置快捷键（读取/注册/校验，存 [Hotkeys] 段）
 ├── Settings\
 │   └── Settings.ahk    设置窗口（功能开关 + 快捷键配置）
+├── Updater\
+│   └── Updater.ahk     GitHub 自动更新（仅编译版：检查/下载/SHA256 校验/自替换）
 ├── Screenshot\
 │   ├── Screenshot.ahk  区域截图主流程（选区 overlay/截图/标注编辑窗）
 │   ├── Editor.ahk      标注编辑窗（绘制工具/清除/钉屏/复制/保存）
@@ -116,7 +127,7 @@ build.bat                编译脚本（输出 output\zestcaps.exe）
 ## 配置说明
 
 - `config.ini`：功能开关与可配置快捷键
-  - 功能开关初始状态（`IndicatorEnabled`、`PastePlainEnabled`、`ScreenshotEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`），设置窗口保存时自动写回
+  - 功能开关初始状态（`IndicatorEnabled`、`PastePlainEnabled`、`ScreenshotEnabled`、`SplashEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`、`RecycleBinEnabled`、`AutoUpdateEnabled`），设置窗口保存时自动写回
   - 可配置快捷键（`[Hotkeys]` 段：`PastePlain`、`Screenshot`），在设置窗口「快捷键」文本框直接填写 AHK 原生格式（如 `^v`、`F1`），保存后重启生效
 - `src\Config\Config.ahk`：其余参数硬编码
   - 菜单文字（`MENU_TITLE`、`MENU_SETTINGS`、`MENU_RESTART`、`MENU_EXIT`）

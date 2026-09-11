@@ -40,6 +40,4 @@ tmp/
 # Yunit 单测产物（CI 收集用，不入仓库）
 **/junit_unit_*.xml
 
-# 编辑器/工具私有配置
-.trae/
 
