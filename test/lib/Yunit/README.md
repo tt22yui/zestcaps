@@ -2,12 +2,17 @@
 
 第三方单元测试框架，引入自 [Uberi/Yunit](https://github.com/Uberi/Yunit) 的 `v2` 分支。
 
-- 许可：GNU AGPL-3.0（见 [LICENSE](https://github.com/Uberi/Yunit/blob/v2/LICENSE.txt)）
+- 许可：GNU AGPL-3.0（上游许可文本：[LICENSE.txt](https://github.com/Uberi/Yunit/blob/v2/LICENSE.txt)，
+  规范文本：<https://www.gnu.org/licenses/agpl-3.0.txt>）。
+  本目录未随附许可全文——引入时环境无外网，无法下载核对；如需完整文本请从上述地址获取，
+  或执行：`Invoke-WebRequest https://www.gnu.org/licenses/agpl-3.0.txt -OutFile test\lib\Yunit\LICENSE-AGPL-3.0.txt`。
 - 文件说明：
   - `Yunit.ahk` — 框架核心（`Yunit.Use(输出模块...).Test(测试类...)`）
   - `Stdout.ahk` — `YunitStdOut`，逐条输出 PASS/FAIL 到 stdout
   - `JUnit.ahk` — `YunitJUnit`，汇总输出 JUnit XML 到 `A_ScriptDir\junit.xml`
-- 本项目适配：JUnit.ahk 修正了 AHK v2 下 Error 属性大小写（`Line`/`Message`）并补充 XML 转义。
+- 本项目适配（按项目规则「只改 Stdout.ahk / JUnit.ahk，不动 Yunit.ahk 核心」）：
+  - `JUnit.ahk`：修正 AHK v2 下 Error 属性大小写（`Line`/`Message`）、补充 XML 转义、
+    把局部变量 `file` 改名为 `f`（与内置 `File` 类同名会在 `#Warn All` 下告警）。
 
 ## 用法
 

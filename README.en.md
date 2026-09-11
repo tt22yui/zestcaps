@@ -23,7 +23,7 @@ The CapsLock-based input method switching on macOS has always been a great exper
 
 - While the cursor is in a text-input context, shows the current input method state `中` / `英` / `A` in real time next to the cursor
 - Based on the `WM_IME_CONTROL` message for **real-time detection** of the true state, no manual syncing, compatible with TSF input methods such as WeType
-- **Remembers the input method per window** and restores it automatically when switching windows
+- **Remembers the input method per process** and restores it automatically when switching windows (windows of one process share a single state; tracking is by process name because window handles are unstable in WebView2/Tauri apps)
 - State caching + repaint only on change, flicker-free and low resource usage
 - Toggleable in the settings window
 
@@ -68,7 +68,7 @@ The CapsLock-based input method switching on macOS has always been a great exper
 ## Input Method Detection Principle
 
 ```text
-Real-time query (WM_IME_CONTROL, primary) → every 80 ms, compatible with TSF input methods such as WeType
+Real-time query (WM_IME_CONTROL, primary) → every 10 ms (IND_UPDATE_INTERVAL), compatible with TSF input methods such as WeType
    ↓ on query failure
 Per-window state cache (Map, capped at 200 entries with auto-cleanup)
    ↓ new window without cache
@@ -119,7 +119,7 @@ src\
 │   └── Gdip_All_v2.ahk Gdip library (screenshot/splash; the only third-party dependency)
 └── TrayMenu\
     └── TrayMenu.ahk    Tray menu initialization (settings / restart / exit)
-build.bat               Build script (outputs output\zestcaps.exe)
+build.bat               Build script (outputs output\zestcaps_v<version>.exe)
 ```
 
 > Convention: the fixed CapsLock hotkey is defined in `src\Main.ahk`; other hotkeys are dynamically registered (configurable) in `src\Hotkeys\Hotkeys.ahk`; each feature lives in `src\<module-name>\` for easy extension and maintenance.
@@ -148,7 +148,7 @@ Restart the script after modifying.
 
 ## Build
 
-Run `build.bat` to compile the script into a standalone `output\zestcaps.exe` (requires AutoHotkey v2 and the Ahk2Exe compiler).
+Run `build.bat` to compile the script into a standalone `output\zestcaps_v<version>.exe` (requires AutoHotkey v2 and the Ahk2Exe compiler).
 
 ## License
 

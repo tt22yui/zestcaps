@@ -23,7 +23,7 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 
 - 鼠标处于文本输入形态时，在光标旁实时显示当前输入法状态：`中` / `英` / `A`
 - 基于 `WM_IME_CONTROL` 消息**实时检测**真实状态，无需手动同步，兼容微信输入法等 TSF 输入法
-- **按窗口独立记忆**输入法状态，切换窗口自动恢复
+- **按进程独立记忆**输入法状态，切换窗口自动恢复（同一进程的多个窗口共享一份状态；WebView2/Tauri 场景下窗口句柄不稳定，故用进程名作稳定跟踪键）
 - 状态缓存 + 变化时才重绘，防闪烁、低资源占用
 - 设置窗口可随时开关
 
@@ -68,7 +68,7 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 ## 输入法检测原理
 
 ```text
-实时查询（WM_IME_CONTROL，主手段）→ 每 80ms 一次，兼容微信输入法等 TSF 输入法
+实时查询（WM_IME_CONTROL，主手段）→ 每 10ms 一次（IND_UPDATE_INTERVAL），兼容微信输入法等 TSF 输入法
    ↓ 查询失败时
 按窗口状态缓存（Map，上限 200 条自动清理）
    ↓ 新窗口无缓存时
@@ -119,7 +119,7 @@ src\
 │   └── Gdip_All_v2.ahk  Gdip 库（截图/闪屏，唯一第三方依赖）
 └── TrayMenu\
     └── TrayMenu.ahk     托盘菜单初始化（设置/重启/退出）
-build.bat                编译脚本（输出 output\zestcaps.exe）
+build.bat                编译脚本（输出 output\zestcaps_v<版本>.exe）
 ```
 
 > 约定：CapsLock 固定热键定义在 `src\Main.ahk`，其余快捷键在 `src\Hotkeys\Hotkeys.ahk` 动态注册（可配置）；各功能实现放在 `src\<模块名>\` 文件夹内，便于后续扩展与维护。
@@ -148,7 +148,7 @@ build.bat                编译脚本（输出 output\zestcaps.exe）
 
 ## 构建
 
-运行 `build.bat` 可将脚本编译为独立的 `output\zestcaps.exe`（需已安装 AutoHotkey v2 及编译器 Ahk2Exe）。
+运行 `build.bat` 可将脚本编译为独立的 `output\zestcaps_v<版本>.exe`（需已安装 AutoHotkey v2 及编译器 Ahk2Exe）。
 
 ## License
 
