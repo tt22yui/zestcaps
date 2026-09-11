@@ -173,7 +173,7 @@ jobs:
         run: |
           # 复用第 2 步下载的官方 Zip 内的 Compiler\Ahk2Exe.exe：
           # 第三方编译 action 会直接产出分发给用户的 exe，风险过高（且需把 GITHUB_TOKEN 交给外部代码）。
-          # 兼容两种目录布局：ZIP 便携版（Compiler 与 AutoHotkey64.exe 同级）与安装版（AutoHotkey64.exe 在 v2\ 下）
+          #
           # 解析解释器（同上：不依赖跨步骤环境变量，取不到就现场搜索）
           $ahk = $env:AHK_BASE
           if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
@@ -181,17 +181,67 @@ jobs:
             if ($found) { $ahk = $found.FullName }
           }
           if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) { Write-Host "未找到 AutoHotkey64.exe"; exit 1 }
+          $base = $ahk        # 编译用的 base 解释器（优先便携 ZIP 内的）
+          $ahk2exe = ""
+          $tried = @()
+          # ① 解释器所在目录（便携 ZIP 若带 Compiler 则在此；注意：实测 2.0.26 便携 ZIP **不含**编译器，
+          #    这一步只为将来 ZIP 布局变化兜底）
           $ahkRoot = Split-Path $ahk -Parent
-          $candidates = @(
-            (Join-Path $ahkRoot "Compiler\Ahk2Exe.exe"),
-            (Join-Path (Split-Path $ahkRoot -Parent) "Compiler\Ahk2Exe.exe")
-          )
-          $ahk2exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $ahk2exe) { Write-Host "未找到 Ahk2Exe.exe，已尝试：$($candidates -join ' ; ')"; exit 1 }
+          foreach ($c in @((Join-Path $ahkRoot "Compiler\Ahk2Exe.exe"), (Join-Path (Split-Path $ahkRoot -Parent) "Compiler\Ahk2Exe.exe"))) {
+            $tried += $c
+            if (-not $ahk2exe -and (Test-Path -LiteralPath $c)) { $ahk2exe = $c }
+          }
+          # ② 解压目录内递归找（任意布局）
+          if (-not $ahk2exe) {
+            $tried += "递归搜索 $env:RUNNER_TEMP\ahk\**\Ahk2Exe.exe"
+            $f = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "Ahk2Exe.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($f) { $ahk2exe = $f.FullName }
+          }
+          # ③ 运行器上可能已装 AutoHotkey（安装版默认带 Compiler 组件）
+          if (-not $ahk2exe) {
+            foreach ($c in @((Join-Path $env:ProgramFiles "AutoHotkey\Compiler\Ahk2Exe.exe"), (Join-Path ${env:ProgramFiles(x86)} "AutoHotkey\Compiler\Ahk2Exe.exe"))) {
+              if (-not $c) { continue }
+              $tried += $c
+              if (-not $ahk2exe -and (Test-Path -LiteralPath $c)) { $ahk2exe = $c }
+            }
+          }
+          # ④ 从官方 Release 下载 Ahk2Exe（安装版 UX\install-ahk2exe.ahk 用的就是这条路：
+          #    查询 api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest，取首个 .zip 资产，
+          #    解压后放入 Compiler\）。此处照做：API 取资产 → 失败则退回 latest 直链 → 解压后递归找 exe
+          if (-not $ahk2exe) {
+            $ProgressPreference = 'SilentlyContinue'
+            $zipUrl = ""
+            try {
+              $api = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -Headers @{ "User-Agent" = "zestcaps-ci" }
+              $asset = $api.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
+              if ($asset) { $zipUrl = $asset.browser_download_url }
+            } catch {
+              Write-Host "查询 Ahk2Exe Release 失败（将退回直链）：$($_.Exception.Message)"
+            }
+            if (-not $zipUrl) { $zipUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/latest/download/Ahk2Exe.zip" }
+            Write-Host "从官方 Release 获取 Ahk2Exe: $zipUrl"
+            $zipPath = Join-Path $env:RUNNER_TEMP "Ahk2Exe.zip"
+            $dst = Join-Path $env:RUNNER_TEMP "ahk2exe"
+            try {
+              Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+              Expand-Archive -Path $zipPath -DestinationPath $dst -Force
+            } catch {
+              Write-Host "Ahk2Exe 下载/解压失败：$($_.Exception.Message)"
+            }
+            $tried += "递归搜索 $dst\**\Ahk2Exe.exe"
+            $f = Get-ChildItem -Path $dst -Recurse -Filter "Ahk2Exe.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($f) { $ahk2exe = $f.FullName }
+          }
+          if (-not $ahk2exe) {
+            Write-Host "未找到 Ahk2Exe.exe，已尝试:"
+            $tried | ForEach-Object { Write-Host "  $_" }
+            Write-Host "提示：可先在本机用 build.bat 编译，或把官方 Ahk2Exe 放入仓库/自建 release 后更新本步骤的下载地址"
+            exit 1
+          }
           $ver = "${{ steps.version.outputs.version }}"
           $out = "output\zestcaps_v$ver.exe"
           Write-Host "Compiler: $ahk2exe"
-          Write-Host "Base    : $ahk"
+          Write-Host "Base    : $base"
           Write-Host "Output  : $out"
           # 同前：Ahk2Exe 也是 GUI 子系统程序，必须用 Start-Process 读真实退出码
           # （`& $ahk2exe` 在 PowerShell 7 上 $LASTEXITCODE 取不到值，会把成功误判成失败）；
@@ -200,7 +250,7 @@ jobs:
           $cErr = Join-Path $env:RUNNER_TEMP "ahk2exe_err.log"
           $proc = Start-Process -FilePath $ahk2exe -ArgumentList @(
             "/silent", "/in", "`"src\Main.ahk`"", "/out", "`"$out`"",
-            "/icon", "`"resources\capslock.ico`"", "/base", "`"$ahk`"", "/compress", "0"
+            "/icon", "`"resources\capslock.ico`"", "/base", "`"$base`"", "/compress", "0"
           ) -Wait -PassThru -RedirectStandardOutput $cOut -RedirectStandardError $cErr
           $rc = $proc.ExitCode
           if (Test-Path $cOut) { Get-Content $cOut | ForEach-Object { Write-Host $_ } }
