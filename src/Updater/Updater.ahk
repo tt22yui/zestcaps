@@ -3,11 +3,13 @@
 ; 原理：异步请求 GitHub Releases API 获取最新版本号与下载地址，
 ;       用 VerCompare 与本地 APP_VERSION 比较；发现新版本经弹窗确认后，
 ;       下载新 exe 并校验 SHA256，再用 cmd 延迟替换同名 exe 并启动新实例。
-; 入口：设置窗口「关于」页签「检查更新」按钮（见 Settings.ahk）
+; 入口：设置窗口「关于」页签「检查更新」按钮（见 Settings.ahk）；
+;       启动时自动检查（编译版 + 设置开关开启时生效，见 InitStartupUpdateCheck）
 ; 关键点：
 ;   - 仅 A_IsCompiled 时生效；源码运行直接跳过
 ;   - 网络请求用 MSXML2.ServerXMLHTTP 异步发起，定时器轮询 ReadyState
 ;   - 运行中的 exe 无法自我覆盖，必须退出后由 cmd 延时替换并重启
+;   - 全程写 DebugLog（更新不生效时的排查依据），下载阶段的状态/失败原因经 onStatus 回报界面
 ; ==================================================================
 
 ; 检查更新请求状态（全局，供定时器/回调跨调用访问）
@@ -16,6 +18,7 @@ UpdaterOnReady  := ""        ; 完成后的回调函数（存储后调用）
 UpdaterReq      := ""        ; 当前请求对象
 UpdaterPollTimer := 0        ; 轮询定时器句柄
 UpdaterTimeoutTimer := 0     ; 超时看门狗定时器句柄
+UpdaterDlOnStatus := 0       ; 下载阶段界面状态回调（供超时看门狗也能回报，见 DownloadAndReplace）
 
 ; ------------------------------------------------------------------
 ; 异步检查是否有新版本（核心入口）
@@ -31,6 +34,54 @@ CheckForUpdateAsync(onResult) {
         return
     }
     UpdaterStartRequest(APP_GITHUB_API_URL, onResult)
+}
+
+; ------------------------------------------------------------------
+; 启动时自动检查更新（仅编译版 + 「设置 → 关于」开关开启时生效）
+; 由 Main.ahk 在脚本加载完成后调用 InitStartupUpdateCheck()：
+;   - 延迟 1.5 秒触发，避开启动流程（检查本身异步，不阻塞、不卡启动）
+;   - 静默检查：失败/已最新都不打扰用户；发现新版本才弹窗询问是否立即更新
+;   - 关闭方式：设置 → 关于 → 取消「启动时自动检查更新」
+; ------------------------------------------------------------------
+InitStartupUpdateCheck() {
+    global AutoUpdateEnabled
+    if !A_IsCompiled {
+        return                                  ; 源码运行不支持自动替换（与手动检查一致）
+    }
+    if !AutoUpdateEnabled {
+        DebugLog("更新: 启动自动检查已关闭（设置 → 关于）")
+        return
+    }
+    SetTimer(StartupUpdateCheck, -1500)
+}
+
+StartupUpdateCheck() {
+    global APP_VERSION
+    DebugLog("更新: 启动自动检查开始（当前 v" APP_VERSION "）")
+    CheckForUpdateAsync(StartupUpdateCheckDone)
+}
+
+; 启动检查结果：失败静默（不打扰启动），有新版才弹窗询问
+StartupUpdateCheckDone(result) {
+    global APP_VERSION
+    if result["error"] != "" {
+        DebugLog("更新: 启动检查失败（静默忽略）- " result["error"])
+        return
+    }
+    if !result["needUpdate"] {
+        DebugLog("更新: 已是最新版本 v" APP_VERSION)
+        return
+    }
+    newVer := result["latestVersion"]
+    exeUrl := result["exeUrl"]
+    if exeUrl = "" {
+        DebugLog("更新: 发现 v" newVer "，但该发布未附带 exe 下载地址")
+        return
+    }
+    DebugLog("更新: 发现新版本 v" newVer "，弹窗询问是否立即更新")
+    answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否立即下载并更新？更新完成后程序会自动重启。`n`n（可在「设置 → 关于」关闭启动时自动检查）", "ZestCaps 更新", "YesNo IconQuestion")
+    if answer = "Yes"
+        DownloadAndReplace(exeUrl, result["shaUrl"])
 }
 
 ; 构造统一的结果 Map
@@ -49,13 +100,16 @@ NewUpdateResult(latestVersion, currentVersion, needUpdate) {
 ; ------------------------------------------------------------------
 UpdaterStartRequest(url, onResult) {
     global UpdaterReqDone, UpdaterOnReady, UpdaterReq
-    global UpdaterPollTimer, UpdaterTimeoutTimer
+    global UpdaterPollTimer, UpdaterTimeoutTimer, APP_VERSION
     UpdaterReqDone := false
     UpdaterOnReady := onResult
     UpdaterReq := ""
+    DebugLog("更新: 发起检查请求 " url)
     try {
         req := ComObject("MSXML2.ServerXMLHTTP")
         req.Open("GET", url, true)     ; true = 异步
+        ; 显式带 User-Agent：GitHub REST API 对缺少 UA 的请求会直接 403
+        req.setRequestHeader("User-Agent", "ZestCaps/" APP_VERSION)
         req.Send()
         UpdaterReq := req
         ; 轮询（100ms）+ 整体超时看门狗（15s）
@@ -66,6 +120,7 @@ UpdaterStartRequest(url, onResult) {
         UpdaterOnReady := ""
         r := NewUpdateResult("", "", false)
         r["error"] := "发起请求失败：" err.Message
+        DebugLog("更新: 发起请求失败 - " err.Message)
         onResult(r)
     }
 }
@@ -92,6 +147,7 @@ UpdaterTimeout() {
         return
     SetTimer UpdaterPoll, 0
     UpdaterPollTimer := 0
+    DebugLog("更新: 检查请求超时（15s）")
     handleUpdaterTimeoutCallback(UpdaterOnReady)
     UpdaterReqDone := true
     UpdaterOnReady := ""
@@ -119,6 +175,7 @@ UpdaterFinishRequest(req) {
     result := NewUpdateResult("", APP_VERSION, false)
     if (req.Status != 200) {
         result["error"] := "HTTP " req.Status
+        DebugLog("更新: 检查失败 HTTP " req.Status)
         if IsSet(onResult)
             onResult(result)
         return
@@ -128,8 +185,10 @@ UpdaterFinishRequest(req) {
     if latest != "" {
         ; VerCompare 返回正数表示远程较新（需要更新）
         result["needUpdate"] := VerCompare(latest, APP_VERSION) > 0
+        DebugLog("更新: 最新 v" latest " / 当前 v" APP_VERSION " → needUpdate=" (result["needUpdate"] ? 1 : 0))
     } else {
         result["error"] := "无法解析最新版本"
+        DebugLog("更新: 响应中未解析出 tag_name")
     }
     if IsSet(onResult)
         onResult(result)
@@ -160,19 +219,23 @@ ParseGithubRelease(json, &result) {
 
 ; ------------------------------------------------------------------
 ; 下载新 exe(+sha256) → SHA256 校验 → cmd 延迟替换并重启
+; onStatus：可选，界面状态回调（形如 msg => ...）；给了就把进度/失败原因回写界面，
+;           不给则只有 TrayTip（此前一律只有 TrayTip，失败时界面停在"正在下载"，用户以为没反应）
 ; 返回 true 表示已进入替换流程；false 表示下载/校验失败
 ; ------------------------------------------------------------------
-DownloadAndReplace(exeUrl, shaUrl) {
-    global APP_VERSION
+DownloadAndReplace(exeUrl, shaUrl, onStatus := 0) {
+    global APP_VERSION, UpdaterDlOnStatus
+    DebugLog("更新: 开始下载更新包 " exeUrl)
     SplitPath(A_AhkPath, , &exeDir)
     tmpDir := A_Temp "\zestcaps_upd_" A_TickCount
     try DirCreate(tmpDir)
     newExe := tmpDir "\zestcaps_new_v" APP_VERSION ".exe"
     newSha := tmpDir "\zestcaps_new_v" APP_VERSION ".exe.sha256"
+    UpdaterDlOnStatus := onStatus   ; 供超时看门狗回报
     ; 看门狗：下载+校验全程 30s 超时保护
     SetTimer(UpdaterDlTimeout, -30000)
     try {
-        TrayTip "正在下载更新...", "ZestCaps", 1
+        UpdaterReportStatus(onStatus, "正在下载更新…", 1)
         Download(exeUrl, newExe)
         Download(shaUrl, newSha)
         ; SHA256 校验（若 sha256 文件存在且可读）
@@ -180,41 +243,63 @@ DownloadAndReplace(exeUrl, shaUrl) {
         if remoteHash != "" {
             localHash := SHA256Hex(newExe)
             if StrLower(remoteHash) = StrLower(localHash) {
-                TrayTip "下载完成，即将替换并重启。", "ZestCaps", 1
+                DebugLog("更新: 下载完成且 SHA256 校验通过")
+                UpdaterReportStatus(onStatus, "下载完成，即将替换并重启…", 1)
             } else {
-                TrayTip "校验失败：下载文件与发布不一致，已中止更新。", "ZestCaps", 3
+                DebugLog("更新: SHA256 校验失败（远端 " remoteHash " / 本地 " localHash "）")
+                UpdaterReportStatus(onStatus, "更新失败：下载文件与发布校验值不一致，已中止（可稍后重试）", 3)
                 try DirDelete(tmpDir, true)
                 SetTimer(UpdaterDlTimeout, 0)   ; 失败退场前必须取消看门狗，否则 30s 后会被超时回调 ExitApp
+                UpdaterDlOnStatus := 0
                 return false
             }
         } else {
-            TrayTip "下载完成，即将替换并重启。", "ZestCaps", 1
+            DebugLog("更新: 未取得 sha256（发布可能未附带），跳过校验")
+            UpdaterReportStatus(onStatus, "下载完成，即将替换并重启…", 1)
         }
     } catch as err {
-        TrayTip "下载失败：" err.Message, "ZestCaps", 3
+        DebugLog("更新: 下载失败 - " err.Message)
+        UpdaterReportStatus(onStatus, "更新失败：下载出错（" err.Message "）", 3)
         try DirDelete(tmpDir, true)
         SetTimer(UpdaterDlTimeout, 0)   ; 同上：失败退场前取消看门狗
+        UpdaterDlOnStatus := 0
         return false
     }
     SetTimer(UpdaterDlTimeout, 0)   ; 取消看门狗（已到最后一步）
     ; 隐藏托盘图标防止退场残留
     A_IconHidden := true
-    self := A_AhkPath
+    self := A_AhkPath    ; 实测：编译版下 A_AhkPath 即自身 exe 路径（见 test 报告）
     ; cmd 延迟替换：ping 延时约 2 秒等旧进程退出 → 用下载的新 exe 覆盖自身 → 启动新实例
     cmd := 'cmd /c ping -n 3 127.0.0.1 >nul & if exist "' newExe '" move /y "' newExe '" "' self '" & start "" "' self '"'
+    DebugLog("更新: 执行替换并重启 -> " cmd)
     try {
         Run(cmd, exeDir, "Hide")
     } catch as err {
-        TrayTip "启动更新失败：" err.Message, "ZestCaps", 3
+        DebugLog("更新: 启动替换命令失败 - " err.Message)
+        UpdaterReportStatus(onStatus, "更新失败：无法启动替换进程（" err.Message "）", 3)
         try DirDelete(tmpDir, true)
+        UpdaterDlOnStatus := 0
         return false
     }
+    UpdaterDlOnStatus := 0
     ExitApp 0
 }
 
+; 回报更新阶段状态：优先回写界面（onStatus 回调），同时保留 TrayTip 便于托盘场景
+UpdaterReportStatus(onStatus, msg, icon := 1) {
+    if IsObject(onStatus)
+        try onStatus.Call(msg)
+    TrayTip msg, "ZestCaps", icon
+}
+
 ; 下载/校验看门狗
+; 说明：Download 是同步阻塞调用，卡住时整个脚本线程都停着，只能退出应用让用户重开
 UpdaterDlTimeout() {
-    TrayTip "更新下载超时，已中止。", "ZestCaps", 3
+    global UpdaterDlOnStatus
+    DebugLog("更新: 下载/校验超时（30s），退出应用以便下次启动重试")
+    UpdaterReportStatus(UpdaterDlOnStatus, "更新超时已中止：网络较慢或下载被拦截，请稍后重试。", 3)
+    Sleep 1200          ; 给界面/气泡一点时间再退出
+    UpdaterDlOnStatus := 0
     ExitApp
 }
 

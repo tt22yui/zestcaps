@@ -275,13 +275,19 @@ HandleUpdateDone(btnUpdate, updProg, updStatus, result, pulse) {
     updStatus.Text := "发现新版本 v" newVer
     answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否下载并更新？更新完成后将自动重启。", "ZestCaps 更新", "YesNo IconQuestion")
     if answer = "Yes"
-        DownloadAndReplaceResult(exeUrl, result["shaUrl"], updStatus)
+        DownloadAndReplaceResult(exeUrl, result["shaUrl"], updStatus, btnUpdate)
 }
 
-; 下载并替换；同时更新关于页状态文本，让用户看到下载/校验进度
-DownloadAndReplaceResult(exeUrl, shaUrl, updStatus) {
-    ; 复用 Updater 的原生下载/校验/替换，但其内部用 TrayTip 提示；
-    ; 这里先给出窗口内反馈，最终结果由重启与否决定。
+; 下载并替换；把下载/校验/替换过程中的状态与失败原因回写到窗口
+; （此前失败只走 TrayTip、界面永远停在"正在下载更新…"，用户看不到任何反馈＝以为"只检查不更新"）
+DownloadAndReplaceResult(exeUrl, shaUrl, updStatus, btnUpdate) {
     updStatus.Text := "正在下载更新…完成后将自动替换并重启。"
-    DownloadAndReplace(exeUrl, shaUrl)
+    ; Download 是同步阻塞调用，这里先让上面的文本真正画出来（Sleep 期间 AHK 会处理窗口消息）
+    Sleep 60
+    ok := DownloadAndReplace(exeUrl, shaUrl, (msg) => (updStatus.Text := msg, updStatus.Redraw()))
+    if !ok {
+        ; 失败：恢复按钮，让用户可直接重试（换网络/稍后再试）
+        btnUpdate.Enabled := true
+        btnUpdate.Text := "检查更新"
+    }
 }
