@@ -27,11 +27,25 @@ IndGUI.Hide()
 global indicatorBriefShow := false
 
 ; 启动定时器，让指示器跟随鼠标（仅功能开启时启动，避免禁用时空转）
+; 时间分辨率是否有本进程的提升，供退出时配对 timeEndPeriod
+global indicatorTimePeriodRaised := false
 if IndicatorEnabled {
     ; 提高系统定时器时钟分辨率为 1ms，让 10ms 周期的位置刷新真正达标（顺滑需要；会轻微增加 CPU 耗电）
     DllCall("winmm\timeBeginPeriod", "uint", 1)
+    indicatorTimePeriodRaised := true
     SetTimer _UpdateIndicator, IND_UPDATE_INTERVAL
     _UpdateIndicator()
+}
+
+; 退出时配对释放时间分辨率提升（进程退出系统本会回收，但显式配对更规范：
+; 不配对会在本进程整个生命周期内持续抬高系统计时精度，影响其他程序与笔记本耗电）
+OnExit(Indicator_OnExit)
+Indicator_OnExit(ExitReason, ExitCode) {
+    global indicatorTimePeriodRaised
+    if indicatorTimePeriodRaised {
+        try DllCall("winmm\timeEndPeriod", "uint", 1)
+        indicatorTimePeriodRaised := false
+    }
 }
 
 ; 定时器回调：更新指示器位置和内容（带缓存，避免无意义重绘）
@@ -69,7 +83,7 @@ _UpdateIndicator() {
         imcValid := activeHwnd ? DetectIMCValid(activeHwnd) : false
         imeFailStreak := 0
     } catch {
-        ; 检测异常：连续失败只记失败起始拍的日志，避免每 80ms 周期刷屏
+        ; 检测异常：连续失败只记失败起始拍的日志，避免每 10ms 周期刷屏
         imeFailStreak += 1
         if imeFailStreak = 1
             DebugLog("_UpdateIndicator: IME 检测异常(DllCall 抛错)，兜底为不确定状态(连续失败 #1)")

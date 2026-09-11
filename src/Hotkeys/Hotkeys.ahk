@@ -28,14 +28,20 @@ if !IsValidHotkey(ScreenshotKey)
 ; 注册失败（如被系统/其他程序占用）仅记日志，不中断启动
 ; ==================================================================
 RegisterCustomHotkeys() {
+    global ScreenshotEnabled
     ; AHK v2 约定：Hotkey 回调必须能接收热键名参数，0 参数函数（如 PastePlain/SelectRegionToCapture）
     ; 需用变参闭包 `(*) => 函数()` 包裹，否则抛 "Invalid callback function" 导致注册静默失败
     try Hotkey(PastePlainKey, (*) => PastePlain(), "On")
     catch as err
         DebugLog("快捷键注册失败: " PastePlainKey " → " err.Message)
-    try Hotkey(ScreenshotKey, (*) => SelectRegionToCapture(), "On")
-    catch as err
-        DebugLog("快捷键注册失败: " ScreenshotKey " → " err.Message)
+    ; 截图功能关闭时不注册热键：SelectRegionToCapture 会直接 return（不透传），
+    ; 注册着等于把该键吞掉（F1 在游戏/帮助里按不动）；不注册即恢复系统/应用原生行为
+    if ScreenshotEnabled {
+        try Hotkey(ScreenshotKey, (*) => SelectRegionToCapture(), "On")
+        catch as err
+            DebugLog("快捷键注册失败: " ScreenshotKey " → " err.Message)
+    } else
+        DebugLog("截图功能已关闭，跳过注册快捷键 " ScreenshotKey)
 }
 
 ; ==================================================================
