@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-11
+
+截图/钉屏与配置健壮性修复，测试与发布链路加固。
+
 ### 修复
 
 - **钉屏后看不到边框**：边框是独立顶层窗口，`Gui.Move` 不会让隐藏窗口显现（实测 Move 后仍不可见），
@@ -170,7 +174,8 @@
 - 基于 AutoHotkey v2，绿色免安装；`build.bat` 可编译为独立 `zestcaps.exe`
 - 全局未捕获错误处理与调试日志，配备按键看门狗防假死
 
-[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.4
 [0.3.3]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.3
 [0.3.2]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.2
 [0.3.0]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.0

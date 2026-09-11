@@ -2,7 +2,7 @@
 
 > **[简体中文](README.md) | English**
 
-> v0.3.3 — [MIT License](LICENSE)
+> v0.3.4 — [MIT License](LICENSE)
 
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
