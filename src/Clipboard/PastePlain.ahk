@@ -3,6 +3,12 @@
 ; 热键由 Hotkeys.ahk 动态注册（可配置，见 src\Hotkeys\Hotkeys.ahk）
 ; ==================================================================
 
+; 纯文本清洗：去掉首尾空白（空格 / 制表符 / 换行），内部空白原样保留
+; 独立成纯函数：剪贴板类的纯逻辑按项目规则必须有单测（test\Clipboard\test_unit_clipboard.ahk）
+PlainTextClean(text) {
+    return Trim(text, " `t`r`n")
+}
+
 ; 粘贴为纯文本并去除格式和首尾空白
 PastePlain() {
     global PastePlainEnabled
@@ -22,7 +28,7 @@ PastePlain() {
     }
 
     ; 去除剪贴板文本的首尾空白字符
-    A_Clipboard := Trim(A_Clipboard, " `t`r`n")
+    A_Clipboard := PlainTextClean(A_Clipboard)
 
     ; 执行粘贴操作
     DebugLog("PastePlain: 纯文本粘贴，发送 ^v")
