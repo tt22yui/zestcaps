@@ -13,6 +13,10 @@
 #Include "..\lib\Yunit\Stdout.ahk"
 #Include "..\lib\Yunit\JUnit.ahk"
 #Include "..\..\src\Config\Config.ahk"
+; Config.ahk 创建 config.ini 的兜底分支会调用 DebugLog；不加载 DebugLog.ahk 的话
+; 该名字会被静态分析当成「从未赋值的全局变量」并告警（跨模块误报，正式运行经 Main.ahk 加载无此问题）
+DEBUG_LOG_ENABLED := false
+#Include "..\..\src\DebugLog\DebugLog.ahk"
 
 class ConfigUnitTest {
     test_版本号格式() {

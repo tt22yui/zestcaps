@@ -1,6 +1,14 @@
 ; 编译加载检查：按 Main.ahk 的加载顺序加载相关真实模块链（Config → DebugLog → Screenshot），
 ; 验证改动无编译 Error/Warning。运行后检查 stderr 是否输出 Error / Warning 即判定通过。
 ;
+; 与 test\Load\validate_main.ahk 的分工（两者互补，不是重复）：
+;   - validate_main.ahk：用 AHK 的 /validate 做**静态**全链路校验（不执行任何代码，零副作用），
+;     由 CI 作为编译门禁（#Warn All, StdOut，任何告警/错误即失败）；覆盖 Main.ahk 的完整 #Include 链。
+;   - 本文件：**执行**各模块顶层代码（Gdip_Startup、托盘菜单初始化、热键注册等），
+;     能抓到 /validate 抓不到的运行期加载错误（如模块顶层调用不存在/签名不匹配）；
+;     代价是会真的把模块跑起来，故不放进 CI，供本地排查用。
+;   语法/告警回归请优先跑 validate_main.ahk（快且无副作用）。
+;
 ; 历史教训（v2.0.26 实测，供复盘）：
 ;   - 不在此处注册 OnError(LogErr)：
 ;       a) 回调函数未定义就注册 → 抛 "Invalid callback function"

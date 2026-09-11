@@ -15,6 +15,10 @@ tests := [
     "Config\test_unit_config.ahk",
     "DebugLog\test_unit_debuglog.ahk",
     "Hotkeys\test_unit_hotkeys.ahk",
+    "Clipboard\test_unit_clipboard.ahk",
+    "Updater\test_unit_updater.ahk",
+    "RecycleBin\test_unit_recyclebin.ahk",
+    "Screenshot\test_unit_dblclick.ahk",
 ]
 
 ; 向 stdout 写入（与 YunitStdOut 同策略：无 stdout 管道/重定向时静默跳过）

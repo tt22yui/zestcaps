@@ -24,6 +24,7 @@ SplashEnabled := false         ; 跳过闪屏窗口
 
 testFile := A_Temp "\_tmp_main_load_test.txt"
 try FileDelete(testFile)
+failCount := 0   ; 任一段 FAIL 即非零退出（此前恒 ExitApp 0，失败对调用方/CI 完全不可见）
 
 ; 看门狗：15 秒强制退出，防止测试期间创建的窗口残留（Updater 纯逻辑验证需要比原来多几个毫秒但整体仍远小于 15 秒）
 SetTimer(() => ExitApp(), 15000)
@@ -36,17 +37,21 @@ try {
     DebugLog("=== 脚本启动 v" APP_VERSION "（总加载耗时 " elapsed " ms）===")
     FileAppend "OK: 完整加载链通过，耗时 " elapsed " ms`n", testFile
 } catch as err {
+    failCount += 1
     FileAppend "FAIL: " err.Message " @" err.Line "`n", testFile
 }
 
 ; 验证自定义快捷键动态注册（真实模块 + 真实注册函数）
 try {
     RegisterCustomHotkeys()
-    ; 已注册的热键可用 Hotkey 开关指令探测（未注册会抛错）
+    ; 已注册的热键可用 Hotkey 开关指令探测（未注册会抛错）；
+    ; 截图功能关闭时其热键按设计不注册（避免吞键），故仅在该功能开启时探测
     Hotkey PastePlainKey, "On"
-    Hotkey ScreenshotKey, "On"
-    FileAppend "OK: 自定义快捷键注册成功 (" PastePlainKey " / " ScreenshotKey ")`n", testFile
+    if ScreenshotEnabled
+        Hotkey ScreenshotKey, "On"
+    FileAppend "OK: 自定义快捷键注册成功 (" PastePlainKey " / " (ScreenshotEnabled ? ScreenshotKey : "截图已关闭，未注册") ")`n", testFile
 } catch as err {
+    failCount += 1
     FileAppend "FAIL: 自定义快捷键注册失败: " err.Message " @" err.Line "`n", testFile
 }
 
@@ -66,6 +71,7 @@ try {
         throw Error("版本比较判定错误")
     FileAppend "OK: Updater.JSON解析/版本比较通过`n", testFile
 } catch as err {
+    failCount += 1
     FileAppend "FAIL: Updater 逻辑: " err.Message " @" err.Line "`n", testFile
 }
 
@@ -81,6 +87,14 @@ try {
     try FileDelete(probe)
     FileAppend "OK: Updater.SHA256读取/计算通过`n", testFile
 } catch as err {
+    failCount += 1
     FileAppend "FAIL: Updater SHA256: " err.Message " @" err.Line "`n", testFile
 }
-ExitApp()
+
+; 汇总：回显结果到 stdout（重定向/CI 可见）并按失败数决定退出码
+try FileAppend (failCount ? "RESULT: FAILED`n" : "RESULT: PASSED`n"), testFile
+if FileExist(testFile) {
+    try FileAppend FileRead(testFile), "*"
+    try FileDelete(testFile)   ; 一次性结果文件用完即删
+}
+ExitApp failCount ? 1 : 0
