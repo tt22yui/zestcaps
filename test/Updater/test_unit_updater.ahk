@@ -24,6 +24,13 @@
 ; Config 常量占位（仅本测试使用：Config.ahk 不加载，避免其在 test 目录生成 config.ini）
 APP_VERSION := "0.0.0"
 APP_GITHUB_API_URL := ""
+AutoUpdateEnabled := false    ; InitStartupUpdateCheck 会读它（占位避免 UseUnsetGlobal 告警）
+; Updater 全程写 DebugLog（更新不生效时的排查依据）：不加载 DebugLog.ahk 会被静态分析当成
+; 「从未赋值的全局变量」而刷告警（跨模块误报）。关日志 + 最小占位，且不产生日志文件
+DEBUG_LOG_ENABLED := false
+DEBUG_LOG_FILE := ""
+DEBUG_LOG_MAX_SIZE_KB := 800
+#Include "..\..\src\DebugLog\DebugLog.ahk"
 #Include "..\..\src\Updater\Updater.ahk"
 
 ; ==================================================================
@@ -191,6 +198,31 @@ class UpdaterUnitTest {
         Yunit.Assert(ReadFirstHash(this._sha) = "", "仅空白内容应返回空串，实际: [" ReadFirstHash(this._sha) "]")
         UpdaterTestWriteRaw(this._sha, "`r`n" h "  x.exe`r`n")
         Yunit.Assert(ReadFirstHash(this._sha) = "", "首行为空行应返回空串（不越过首行取哈希），实际: [" ReadFirstHash(this._sha) "]")
+    }
+
+    ; -------- 更新入口：源码模式门控与状态回报 --------
+    ; 说明：这里只测"不触网"的部分。DownloadAndReplace 不在此测试——它内部可能 Run+ExitApp，
+    ; 会把测试进程直接带走（故只在真实更新流程中验证）。
+    test_源码模式下检查更新同步返回无需更新() {
+        ; 非编译版必须同步回调"无需更新"，绝不发起网络请求（否则源码测试会打网络/卡住）
+        holder := { got: 0, res: 0 }
+        CheckForUpdateAsync((r) => (holder.got := 1, holder.res := r))
+        Yunit.Assert(holder.got = 1, "回调应被同步调用（源码模式不等网络）")
+        Yunit.Assert(IsObject(holder.res) && holder.res["needUpdate"] = false, "源码模式应返回 needUpdate=false")
+        Yunit.Assert(IsObject(holder.res) && holder.res["error"] = "", "源码模式不应报错")
+    }
+
+    test_启动检查在源码模式下不排程不请求() {
+        InitStartupUpdateCheck()
+        Yunit.Assert(UpdaterReq = "" && UpdaterReqDone = false, "源码模式不应发起任何请求")
+        Yunit.Assert(UpdaterOnReady = "", "不应注册回调")
+    }
+
+    test_状态回报优先回写界面() {
+        ; 给了回调（GUI 场景）→ 状态文本交给回调；这是"失败也要让用户看见"的实现基础
+        holder := { msgs: [] }
+        UpdaterReportStatus((m) => holder.msgs.Push(m), "阶段一", 1)
+        Yunit.Assert(holder.msgs.Length = 1 && holder.msgs[1] = "阶段一", "状态文本应回写给回调")
     }
 
     ; -------- SHA256Hex --------
