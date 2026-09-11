@@ -142,7 +142,9 @@ UpdaterFinishRequest(req) {
 ParseGithubRelease(json, &result) {
     if RegExMatch(json, '"tag_name"\s*:\s*"([^"]+)"', &m) {
         result["latestTag"] := m[1]
-        result["latestVersion"] := SubStr(m[1], 2)
+        ; 只去掉可能存在的 v 前缀，不能无条件截首字符：tag "0.4.0" 会被截成 ".4.0" 导致版本比较错乱
+        ; （CI 目前只发 v* 标签，属隐患防御；口径与 .github\workflows\build.yml 的 `-replace '^v',''` 一致）
+        result["latestVersion"] := RegExReplace(m[1], "(?i)^v", "")
     }
     pos := 1
     while RegExMatch(json, '"browser_download_url"\s*:\s*"([^"]+)"', &mu, pos) {
@@ -182,6 +184,7 @@ DownloadAndReplace(exeUrl, shaUrl) {
             } else {
                 TrayTip "校验失败：下载文件与发布不一致，已中止更新。", "ZestCaps", 3
                 try DirDelete(tmpDir, true)
+                SetTimer(UpdaterDlTimeout, 0)   ; 失败退场前必须取消看门狗，否则 30s 后会被超时回调 ExitApp
                 return false
             }
         } else {
@@ -190,6 +193,7 @@ DownloadAndReplace(exeUrl, shaUrl) {
     } catch as err {
         TrayTip "下载失败：" err.Message, "ZestCaps", 3
         try DirDelete(tmpDir, true)
+        SetTimer(UpdaterDlTimeout, 0)   ; 同上：失败退场前取消看门狗
         return false
     }
     SetTimer(UpdaterDlTimeout, 0)   ; 取消看门狗（已到最后一步）
@@ -216,13 +220,20 @@ UpdaterDlTimeout() {
 
 ; ------------------------------------------------------------------
 ; 读取发布附带的 sha256 文件首行哈希（格式 "hash  filename"）
+; 空文件 / 空行返回 ""（原实现直接取 StrSplit 结果第 1 项，空文件会抛 Invalid index，
+; 被下载失败分支吞成「下载失败」提示，误导排查）；
+; 首个字段按任意空白切分，兼容多空格与 TAB 分隔（原实现按单个空格切分会把文件名并进哈希）
 ; ------------------------------------------------------------------
 ReadFirstHash(shaFile) {
     if !FileExist(shaFile)
         return ""
     raw := FileRead(shaFile, "UTF-8-RAW")
-    first := Trim(StrSplit(StrReplace(raw, "`r`n", "`n"), "`n")[1])
-    return Trim(StrSplit(first, " ")[1])
+    if (Trim(raw, " `t`r`n") = "")
+        return ""
+    firstLine := Trim(StrSplit(StrReplace(raw, "`r`n", "`n"), "`n")[1], " `t`r`n")
+    if RegExMatch(firstLine, "^\s*(\S+)", &m)
+        return m[1]
+    return ""
 }
 
 ; ------------------------------------------------------------------
