@@ -62,6 +62,8 @@ The CapsLock-based input method switching on macOS has always been a great exper
 
 - The settings "About" page offers a "Check for Updates" button and an "auto check for updates at startup" toggle; clicking asynchronously queries the latest GitHub release
 - Semantic-version comparison + SHA256 verification, then download with a delayed auto-replace and restart after confirmation
+- Silent check at startup (when the toggle is on and the build is compiled): nothing is shown when already up to date or when the check fails, and a dialog asks before updating when a new version is found
+- Download/verification/replace failures are shown right in the settings window (and written to the debug log) instead of silently doing nothing
 - Self-replaces via the running executable's real path, so it works even if you rename the exe
 - Takes effect only in compiled builds; source runs show a "not available" notice
 
