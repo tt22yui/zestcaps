@@ -1,4 +1,4 @@
-﻿; ==================================================================
+; ==================================================================
 ; 定时清空回收站 —— 每天固定时刻清空回收站中「删除时间超过 N 天」的项
 ; 清空策略「保留近期 N 天」：只物理删除 $R 数据项与对应 $I 元文件，
 ;   近 N 天内删除的文件（在回收站内可找回）保留不动。
@@ -43,9 +43,25 @@ RecycleBinFire() {
         ScheduleNextRecycle()                      ; 重新排程下一天
 }
 
+; ----- 判断某个回收站项是否应被清理（纯函数，便于单测）-----
+; 入参：delTime 删除时间（$I 元文件时间，"yyyyMMddHHmmss"；缺失为 ""）
+;       keepDays 保留天数；now 当前时刻（同格式，通常传 A_Now）
+; 返回 true = 删除时间早于保留阈值，应清理
+; 安全策略（本模块会永久删除用户文件，拿不准时一律保留）：
+;   - keepDays <= 0 → 不清理（防御：避免被当成"全清"）
+;   - delTime 缺失或非 14 位数字格式 → 不清理（异常时间戳绝不触发删除）
+;   - 严格早于阈值才清理；正好等于阈值（边界当天）保留
+RecycleBinShouldDelete(delTime, keepDays, now) {
+    if (keepDays <= 0)
+        return false
+    if !RegExMatch(delTime, "^\d{14}$")
+        return false
+    return delTime < DateAdd(now, -keepDays, "Days")
+}
+
 ; ----- 清空回收站中超过保留天数的项，返回本次删除项数 -----
 ; 实现：Shell.Application 枚举回收站 → 取每项物理 $R 路径构造 $I 元文件路径 →
-;     以 $I 元文件修改时间作为删除时间，与「N 天前」阈值比对 → 超期则物理删除 $R 与 $I
+;     以 $I 元文件修改时间作为删除时间（RecycleBinShouldDelete 判定）→ 超期则物理删除 $R 与 $I
 RecycleBinCleanup() {
     global RBKeepDays
     if RBKeepDays <= 0
@@ -53,7 +69,6 @@ RecycleBinCleanup() {
     try {
         shell := ComObject("Shell.Application")
         recycle := shell.Namespace(10)       ; 10 = 回收站（sftphFOLDERID_RecycleBin）
-        cut := DateAdd(A_Now, -RBKeepDays, "Days")   ; 本地时间阈值
         nDeleted := 0
         for item in recycle.Items() {
             rPath := item.Path
@@ -65,9 +80,11 @@ RecycleBinCleanup() {
                 continue
             dir := SubStr(rPath, 1, StrLen(rPath) - StrLen(base))
             iPath := dir StrReplace(base, "$R", "$I")   ; 对应 $I 元文件
-            delTime := FileGetTime(iPath, "M")   ; 删除时间存于 $I 元文件修改时间（本地）
-            if delTime = "" || delTime >= cut
-                continue                       ; 缺 $I 或仍在保留期内 → 跳过
+            ; 单个项的 $I 读取失败不应中断整轮清理（缺失/被占用时按"保留"跳过）
+            delTime := ""
+            try delTime := FileGetTime(iPath, "M")   ; 删除时间存于 $I 元文件修改时间（本地）
+            if !RecycleBinShouldDelete(delTime, RBKeepDays, A_Now)
+                continue
             if SafeRecycleDelete(rPath, iPath)
                 nDeleted++
         }
