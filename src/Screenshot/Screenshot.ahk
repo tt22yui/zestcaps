@@ -42,16 +42,15 @@ global ScreenshotSaveFilename := "" ; 选区保存确认的保存路径（Select
 global ScreenshotSaveBitmap := 0    ; 选区保存确认时已定格的截图位图（SelectRegion 内先抓图再弹框，交外层落盘并释放；取消保存不设置）
 GdipToken := Gdip_Startup()
 if !GdipToken {
-    MsgBox "GDI+ 初始化失败", "错误", "IconX"
-    ExitApp
+    ; GDI+ 不可用时只停用截图功能，不弹模态框、更不退出脚本：
+    ; CapsLock 切换/指示器等核心功能与截图无关，不应被一起带走
+    ; （闪屏同样是 GDI+ 依赖，已按「优雅跳过」处理，此处保持一致）
+    ScreenshotEnabled := false
+    DebugLog("截图: GDI+ 初始化失败，已自动停用截图功能（其余功能正常）")
 }
-OnExit(Screenshot_OnExit)
-; 退出时不调用 Gdip_Shutdown：GDI+ 在最后一次 shutdown 时才释放全部全局对象，
+; 退出时不注册 OnExit 清理、也不调用 Gdip_Shutdown：GDI+ 在最后一次 shutdown 时才释放全部全局对象，
 ; 截图会话累积的位图/画布对象会使这一步挂起约 2 秒，阻塞 Reload 时旧实例退出
 ; （新实例被 #SingleInstance 等待，造成"重启慢"）。进程退出时系统自动回收 GDI+ 资源。
-Screenshot_OnExit(ExitReason, ExitCode) {
-    return
-}
 
 ; ------------------------------------------------------------------
 ; 截图区域数据结构（记录屏幕矩形或跟踪的窗口）
@@ -94,7 +93,14 @@ class RegionSetting {
             this.win_id := 0
             return false
         }
-        WinGetPos &x, &y, &w, &h, "ahk_id " this.win_id
+        ; 窗口可能在 WinExist 与 WinGetPos 之间消失（AHK v2 对已销毁窗口抛 TargetError）。
+        ; 本函数由悬停/拖动定时器与消息回调复用，异常会顺着定时器线程中断整个截图会话（蒙版残留），
+        ; 故统一兜底为「窗口已失效」，回落自由矩形
+        try WinGetPos &x, &y, &w, &h, "ahk_id " this.win_id
+        catch {
+            this.win_id := 0
+            return false
+        }
         this.left := x
         this.top := y
         this.right := x + w
@@ -231,7 +237,10 @@ GetWindowRegionFromMouse(region) {
         }
     }
     if overWin {
-        cls := WinGetClass("ahk_id " overWin)
+        ; overWin 来自刚枚举的窗口，仍可能在枚举与查询之间消失（AHK v2 抛 TargetError，
+        ; 而本函数跑在 10ms 悬停定时器里）→ 兜底按「非桌面」处理，不中断截图会话
+        cls := ""
+        try cls := WinGetClass("ahk_id " overWin)
         if (cls = "WorkerW" || cls = "Progman")
             overWin := 0  ; 桌面
     }
@@ -432,6 +441,7 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
         action := "editor"
         if state.isDragging {
             toolbar := SelToolbarCreate(state, region)
+            _ResetSelectionDoubleClick()  ; 进入微调前复位双击判定，避免上一会话的按下被算作本次双击
             while true {
                 action := SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar)
                 if action = "cancel"
@@ -760,8 +770,19 @@ _AdjustHitTest(mx, my, l, t, r, b) {
 ; 用于「双击选区 → 直接复制」。static 记录上次按下时间与坐标供连续两次按下判定；
 ; 首按必然返回 false 并记录状态，次按在时间/位移阈值内才判定为双击（不依赖窗口类 CS_DBLCLKS，
 ; 无需注册 0x203，与选区单击平移共用 0x201 消息钩子）
-_IsSelectionDoubleClick(mx, my) {
+; 复位双击判定状态：每次进入选区微调（新会话）时调用
+; 否则 static 跨会话保留，上一次截图结束时的按下若落在双击时间/位移窗内，
+; 新会话的首次单击平移会被误判为「双击 → 直接复制」并提前结束会话
+_ResetSelectionDoubleClick() {
+    _IsSelectionDoubleClick(0, 0, true)
+}
+
+_IsSelectionDoubleClick(mx, my, reset := false) {
     static lastTick := 0, lastX := -9999, lastY := -9999
+    if reset {
+        lastTick := 0, lastX := -9999, lastY := -9999
+        return false
+    }
     now := A_TickCount
     dx := DllCall("GetSystemMetrics", "Int", 36)  ; SM_CXDOUBLECLK
     dy := DllCall("GetSystemMetrics", "Int", 37)  ; SM_CYDOUBLECLK
@@ -873,7 +894,9 @@ SelectRegionToCapture() {
                 filename := ScreenshotSaveFilename
                 ScreenshotSaveFilename := ""
                 FinishSelectionOverlays()
-                if pBitmap && Gdip_SaveBitmapToFile(pBitmap, filename) {
+                ; Gdip 库约定：0=成功、负值=失败（见 Gdip_All_v2.ahk 的 Gdip_SaveBitmapToFile），
+                ; 故必须显式比较 = 0，直接当布尔用会把成功判成失败
+                if (pBitmap && Gdip_SaveBitmapToFile(pBitmap, filename) = 0) {
                     DebugLog("Screenshot: 已保存 -> " filename)
                 } else {
                     DebugLog("Screenshot: 保存失败")

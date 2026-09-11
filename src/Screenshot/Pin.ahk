@@ -4,10 +4,10 @@
 ;
 ; 多钉屏原理：每个钉屏窗口一个会话（PinSessions: hwnd → 状态对象），
 ; 拖动/关闭等消息钩子常驻注册，按 hwnd 查表分发，互不干扰。
-; 两种来源：
-;   1) 就地钉屏（推荐，无感）：编辑窗点击「钉屏」后不关窗，仅移除工具栏/蒙版，
-;      画面原地保留并注册为钉屏会话 —— 见 Editor.ahk 的 EditorPinInPlace()
-;   2) 独立钉屏：ShowPin(pBitmap) 弹出新窗口接管位图（通用入口）
+; 来源：
+;   就地钉屏（无感）：编辑窗点击「钉屏」后不关窗，仅移除工具栏/蒙版，
+;   画面原地保留并注册为钉屏会话 —— 见 Editor.ahk 的 EditorPinInPlace()；
+;   选区工具栏点「钉屏」则经 PinCreateAsync 直接建窗（见 Screenshot.ahk）
 ;
 ; 依赖：Gdip 库（src\Common\Gdip_All_v2.ahk，由 Screenshot.ahk 先行引入）
 ; ==================================================================
@@ -29,6 +29,26 @@ OnMessage(0x201, PinLButtonDown)
 OnMessage(0x200, PinMouseMove)
 OnMessage(0x202, PinLButtonUp)
 OnMessage(0x204, PinRButtonDown)
+OnMessage(0x0005, PinSizeChanged)   ; WM_SIZE：最小化/还原时同步边框可见性（见函数注释）
+
+; ------------------------------------------------------------------
+; 钉屏窗口最小化 / 还原：同步 4 条边框的可见性
+; 背景：边框是独立顶层窗口(+AlwaysOnTop)，不跟随宿主最小化——实测宿主 minmax=-1 时边框仍可见，
+;       用户最小化钉屏后屏幕上会残留 4 条蓝边。
+; WM_SIZE 的 wParam：1=SIZE_MINIMIZED，0=SIZE_RESTORED，2=SIZE_MAXIMIZED
+; ------------------------------------------------------------------
+PinSizeChanged(wParam, lParam, msg, hwnd) {
+    global PinSessions
+    s := PinSessions.Get(hwnd, 0)
+    if !s
+        return
+    if (wParam = 1) {          ; 最小化：隐藏边框（还原时再显现）
+        BorderStripsHide(s.borders)
+        return
+    }
+    ; 还原/最大化：按缓存坐标重新显现（最小化不改窗口位置，无需再查询分层窗口位置）
+    BorderStripsShow(s.borders)
+}
 
 ; ------------------------------------------------------------------
 ; Esc 热键需求管理（编辑 / 钉屏流程间共享，统一分发）
@@ -170,24 +190,27 @@ PinCleanupAsync(hwnd) {
     return 0
 }
 
-; ------------------------------------------------------------------
-; 独立钉屏（阻塞，通用入口）：创建钉屏窗口，等待用户关闭后返回
-; ------------------------------------------------------------------
-ShowPin(pBitmap, centerX := "", centerY := "") {
-    hwnd := PinCreateAsync(pBitmap, centerX, centerY)
-    try WinWaitClose("ahk_id " hwnd)
-}
-
 ; 把工作 bitmap 渲染到钉屏分层窗口
+; 返回 true=已更新；false=GDI 句柄创建失败（窗口保持上一帧内容，不崩不闪）
 _PinUpdateLayer(hwnd, pBmp) {
     Gdip_GetImageDimensions(pBmp, &w, &h)
     hBitmap := Gdip_CreateHBITMAPFromBitmap(pBmp)
     hdc := CreateCompatibleDC()
+    ; 任一创建失败都必须立即退出：否则会拿 0 句柄继续 SelectObject/UpdateLayeredWindow，
+    ; 且已成功创建的句柄会因提前返回而泄漏
+    if (!hBitmap || !hdc) {
+        if hBitmap
+            DeleteObject(hBitmap)
+        if hdc
+            DeleteDC(hdc)
+        return false
+    }
     obm := SelectObject(hdc, hBitmap)
     UpdateLayeredWindow(hwnd, hdc, , , w, h)
     SelectObject(hdc, obm)
     DeleteObject(hBitmap)
     DeleteDC(hdc)
+    return true
 }
 
 ; ------------------------------------------------------------------
@@ -305,6 +328,21 @@ PinMouseMove(wParam, lParam, msg, hwnd) {
 ; 无活动拖动/缩放时自动停止（避免窗口异常关闭后空转）
 PinDragTick() {
     global PinSessions
+    ; 自愈：左键已物理弹起却仍标记拖动/缩放中（WM_LBUTTONUP 丢失，如被其他程序抢走或系统卡顿）——
+    ; 按「松开」收尾，否则窗口会一直黏着鼠标跟随、10ms 定时器持续空转到会话结束
+    if !GetKeyState("LButton", "P") {
+        healed := false
+        for h, s in PinSessions {
+            if (s.drag && s.drag.active) || (s.resize && s.resize.active) {
+                PinFinishDrag(h, s)
+                healed := true
+            }
+        }
+        if healed {
+            SetTimer PinDragTick, 0
+            return
+        }
+    }
     active := false
     for h, s in PinSessions {
         if s.drag && s.drag.active {
@@ -334,6 +372,11 @@ PinClampScale(x) {
 ; 应用缩放：以左上角为锚点等比重绘位图并更新窗口尺寸/位置/边框
 ; 1) 新尺寸 = 原图尺寸 × 系数（保持宽高比）；新位置由固定左上角锚点推导，钳制在工作区内（放大超屏尽量可见）
 ; 2) 重绘显示位图：缩放源（原图或编辑器合成图）等比缩放 + 右下角重画手柄，替换旧工作位图并释放
+; 已知待验证项（DPI 上下文）：本函数由拖动定时器/消息线程调用，运行在进程默认 DPI 上下文；
+;   而钉屏窗口是在截图线程临时切到 PMv2（SetThreadDpiAwarenessContext(-3)）时按物理像素建立的。
+;   单显示器/100% 缩放下两者一致（当前实机表现正常）；多显示器 + 高缩放（如 150%）时
+;   工作区/鼠标坐标可能被系统虚拟化而与本窗口坐标系不一致 → 需实机验证后再统一上下文，
+;   未经实机确认不贸然改动坐标口径（改错会让本来正常的移动/缩放出现偏移）
 PinApplyResize(s, hwnd, scale) {
     scale := PinClampScale(scale)  ; 钳制缩放系数（1/4x ~ 4x）。交互路径已在 PinMouseMove 钳制，此处兜底防御
     newW := Max(1, Round(s.imgW * scale))
@@ -410,6 +453,11 @@ PinLButtonUp(wParam, lParam, msg, hwnd) {
     s := PinSessions.Get(hwnd, 0)
     if !s
         return
+    PinFinishDrag(hwnd, s)
+}
+
+; 结束拖动/缩放：释放捕获并应用最后一帧（左键松开与「丢失松开消息」的自愈共用一套收尾）
+PinFinishDrag(hwnd, s) {
     DllCall("ReleaseCapture")
     if s.drag && s.drag.active {
         s.drag.active := false
@@ -428,10 +476,12 @@ PinLButtonUp(wParam, lParam, msg, hwnd) {
 }
 
 ; 右键：关闭单个钉屏窗口
+; WinClose 包 try：窗口可能在收到消息与关窗之间销毁（AHK v2 对已销毁窗口抛 TargetError），
+; 该回调是热键/消息入口，异常会被全局兜底吞掉但中断本次处理
 PinRButtonDown(wParam, lParam, msg, hwnd) {
     global PinSessions
     if PinSessions.Has(hwnd)
-        WinClose("ahk_id " hwnd)
+        try WinClose("ahk_id " hwnd)
 }
 
 ; Esc：关闭全部钉屏窗口（右键支持逐个关）
@@ -444,7 +494,9 @@ PinEscClose(*) {
     for h in PinSessions
         list.Push(h)
     for h in list {
+        ; 每个窗口独立 try：某个窗口在存在性检查与关窗之间销毁（TargetError）
+        ; 不应中断「关闭全部钉屏」的循环，否则会漏关其余钉屏
         if WinExist("ahk_id " h)
-            WinClose("ahk_id " h)
+            try WinClose("ahk_id " h)
     }
 }

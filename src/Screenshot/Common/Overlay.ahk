@@ -101,7 +101,12 @@ MaskOverlayHole(ov, x, y, w, h) {
         ov.shown := true
     }
     hRgn := MaskHoleRegion(x, y, w, h, ov.mx, ov.my, ov.mw, ov.mh)
-    DllCall("SetWindowRgn", "UPtr", ov.hwnd, "UPtr", hRgn, "Int", 1)
+    ; SetWindowRgn 失败时窗口不接管 region，必须自行 DeleteObject，否则每帧泄漏一个 GDI 区域句柄；
+    ; 失败时不记录 last，让下次调用重试（避免把一次失败当成已应用而永久不更新）
+    if !DllCall("SetWindowRgn", "UPtr", ov.hwnd, "UPtr", hRgn, "Int", 1) {
+        DllCall("DeleteObject", "UPtr", hRgn)
+        return
+    }
     ov.last.x := x, ov.last.y := y, ov.last.w := w, ov.last.h := h
 }
 
@@ -138,6 +143,9 @@ BorderStripsCreate() {
 }
 
 ; 移动 4 条边框到矩形外侧（上/下/左/右细条，围绕矩形不覆盖内容）
+; 注意：Gui.Move 不会让隐藏窗口显现（实测：仅 Move 后 IsWindowVisible 仍为 0），
+;       故对尚不可见的边框改用 Show("NA x/y/w/h") 一步到位「显示 + 定位」。
+;       否则「新建边框后只 Move」的路径（编辑器直接进入、独立钉屏）边框会整场不可见。
 BorderStripsMove(borders, x, y, w, h) {
     global EDIT_BORDER_WIDTH
     b := EDIT_BORDER_WIDTH
@@ -147,8 +155,35 @@ BorderStripsMove(borders, x, y, w, h) {
         [x - b, y, b, h],                ; 左（矩形外左沿）
         [x + w, y, b, h]                 ; 右（矩形外右沿）
     ]
-    for i, r in rects
-        borders[i].Move(r[1], r[2], r[3], r[4])
+    for i, r in rects {
+        g := borders[i]
+        if DllCall("IsWindowVisible", "Ptr", g.Hwnd)
+            g.Move(r[1], r[2], r[3], r[4])
+        else
+            g.Show("NA x" r[1] " y" r[2] " w" r[3] " h" r[4])
+    }
+}
+
+; 显示 4 条边框（保持当前位置；已显示的跳过）
+; 用于宿主窗口还原/恢复显示时复原边框——最小化不改窗口位置，沿用缓存坐标即可，
+; 不必对分层窗口查询位置（WinGetPos 对刚 UpdateLayeredWindow 过的分层窗口有卡死风险，见测试脚本注释）
+BorderStripsShow(borders) {
+    if !IsObject(borders)
+        return
+    for b in borders {
+        if !DllCall("IsWindowVisible", "Ptr", b.Hwnd)
+            try b.Show("NA")
+    }
+}
+
+; 隐藏 4 条边框（幂等）
+; 用于宿主窗口最小化时同步隐藏——边框是独立顶层窗口(+AlwaysOnTop)，不会跟随宿主最小化，
+; 不隐藏就会在桌面上残留 4 条蓝边
+BorderStripsHide(borders) {
+    if !IsObject(borders)
+        return
+    for b in borders
+        try b.Hide()
 }
 
 ; 销毁边框窗口数组（幂等）

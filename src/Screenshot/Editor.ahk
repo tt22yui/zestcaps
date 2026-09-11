@@ -34,7 +34,6 @@ global EditorColorToolbarW := 0, EditorColorToolbarH := 0  ; 颜色工具栏尺�
 global ToolbarPhase := ""       ; 工具栏当前阶段（"selection" 选区 / "editor" 编辑），决定按钮点击行为
 global ScreenToolbarResult := ""  ; 选区阶段动作结果通道（"editor"/save/pin/copy），替代对选区局部 state 的引用
 global EditorToolButtons := Map()  ; 工具名 → 按钮控件（刷新选中态）
-global EditorToolLabels := Map()   ; 工具名 → 基础标签（如 "箭头"）
 global EditorColorSwatches := []   ; 颜色索引 → 色块内块控件（刷新选中态）
 global EditorSwatchFrames := []    ; 颜色索引 → 色块外框控件（选中时外框高亮）
 global EditorPenWidthFrames := []  ; 粗细图标索引 → 外框控件（刷新选中态）
@@ -167,6 +166,9 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
         else
             EditorCreateToolbar()
         EditorToolbarRefresh()
+        ; 覆盖层就绪后才注册 WM_SIZE 同步（编辑器可从任务栏最小化，见 EditorSizeChanged）；
+        ; 提前注册会被初始化期间的 WM_SIZE 触发，导致覆盖层在定位完成前提前显现
+        OnMessage(0x0005, EditorSizeChanged)
 
         ; 等待用户操作（按钮回调 / Esc 设置 EditorResult）
         EditorResult := ""
@@ -187,6 +189,7 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
             OnMessage(0x202, EditorLButtonUp, 0)
             OnMessage(0x204, EditorRButtonDown, 0)
             OnMessage(0x20, EditorSetCursor, 0)
+            OnMessage(0x0005, EditorSizeChanged, 0)   ; 与注册对称注销（编辑器会话结束）
         }
 
         ; 处理结果：按原图分辨率渲染最终图，再执行输出
@@ -205,7 +208,8 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
                 if SubStr(EditorResult, 1, 5) = "save:" {
                     pFull := EditorRenderFull()
                     filename := SubStr(EditorResult, 6)
-                    if Gdip_SaveBitmapToFile(pFull, filename)
+                    ; Gdip 库约定：0=成功、负值=失败（见 Gdip_All_v2.ahk 的 Gdip_SaveBitmapToFile）
+                    if (Gdip_SaveBitmapToFile(pFull, filename) = 0)
                         result := "save:" filename
                     else {
                         result := "save_fail"
@@ -554,7 +558,11 @@ EditorCellAverage(src, x, y, w, h, imgW, imgH) {
     w := Min(w, imgW - x), h := Min(h, imgH - y)
     if (w <= 0 || h <= 0)
         return 0
-    Gdip_LockBits(src, x, y, w, h, &Stride, &Scan0, &BitmapData, 3, 0x26200a)
+    ; 锁失败必须立刻放弃本格：库内 BitmapData 为全 0 初始化，失败时不会被写入，
+    ; Stride/Scan0 会保持 0，继续按 Scan0 读像素等于读空指针（崩溃），且不能对未锁成的位图 UnlockBits；
+    ; 返回 0（全透明）→ 该格绘制不可见，等效于这一格没被马赛克到，属优雅降级
+    if (Gdip_LockBits(src, x, y, w, h, &Stride, &Scan0, &BitmapData, 3, 0x26200a))
+        return 0
     sumR := 0, sumG := 0, sumB := 0, cnt := 0
     py := 0
     loop h {
@@ -575,16 +583,15 @@ EditorCellAverage(src, x, y, w, h, imgW, imgH) {
     return 0xFF000000 | (avR << 16) | (avG << 8) | avB
 }
 
-; 释放标注的缓存资源（Mosaic 无独立 bitmap，仅索引/平均色 Map，可复用同一对象退出即弃）
-EditorReleaseAnnotationCache(ann) {
-}
-
 ; ------------------------------------------------------------------
 ; 鼠标事件（lParam 低16位=客户区X，高16位=客户区Y，符号扩展 → 图片空间坐标）
 ; ------------------------------------------------------------------
 EditorLButtonDown(wParam, lParam, msg, hwnd) {
     global EditorHwnd, EditorPending, EditorTool, EditorColorIdx, EditorPenWidthIdx, EditorScale
     global EditorDragging, EditorDragWinX, EditorDragWinY, EditorDragMouseX, EditorDragMouseY
+    ; 拖动目标/已应用位置同样是模块级全局：漏声明会被当成本函数的局部变量，
+    ; 起点坐标写不到全局（同时触发 #Warn LocalSameAsGlobal）
+    global EditorDragTargetX, EditorDragTargetY, EditorDragAppliedX, EditorDragAppliedY
     global EditorToolbar, EditorColorToolbar
     global EDIT_COLORS, EDIT_LINE_WIDTHS, EDIT_MOSAIC_BRUSH_R
     if (hwnd != EditorHwnd)
@@ -667,9 +674,14 @@ EditorApplyDrag() {
     global EditorHwnd, EditorMaskOv, EditorBorders, EditorWinW, EditorWinH
     if (EditorDragTargetX = EditorDragAppliedX && EditorDragTargetY = EditorDragAppliedY)
         return
-    MoveWindowFast(EditorHwnd, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
-    MaskOverlayHole(EditorMaskOv, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
-    BorderStripsMove(EditorBorders, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
+    ; 覆盖层/编辑窗可能在拖动途中被销毁（如保存框流程把覆盖层藏起来后又销毁）：
+    ; 该函数由 10ms 定时器调用，异常会每拍被全局兜底记录（日志刷屏）且定时器不会自停；
+    ; 这里吞掉异常并照常记录「已应用」，让本帧失败不重试（位置变化后下一帧自然再试）
+    try {
+        MoveWindowFast(EditorHwnd, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
+        MaskOverlayHole(EditorMaskOv, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
+        BorderStripsMove(EditorBorders, EditorDragTargetX, EditorDragTargetY, EditorWinW, EditorWinH)
+    }
     EditorDragAppliedX := EditorDragTargetX
     EditorDragAppliedY := EditorDragTargetY
 }
@@ -679,6 +691,14 @@ EditorDragTick() {
     global EditorDragging
     if !EditorDragging
         return
+    ; 自愈：左键已物理弹起却仍标记拖动中（WM_LBUTTONUP 丢失，如被其他程序抢走或系统卡顿）——
+    ; 否则编辑窗会一直黏着鼠标跟随、10ms 定时器持续空转（与 Pin.ahk 的 PinDragTick 同一处理）
+    if !GetKeyState("LButton", "P") {
+        EditorDragging := false
+        SetTimer EditorDragTick, 0
+        EditorApplyDrag()   ; 应用最后一帧位置
+        return
+    }
     EditorApplyDrag()
 }
 
@@ -705,14 +725,18 @@ EditorLButtonUp(wParam, lParam, msg, hwnd) {
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
     EditorPending.y2 := (lParam << 32 >> 48) / EditorScale
-    ; 画笔/马赛克：追记末点；单点（仅点击无拖动）不提交
+    ; 画笔/马赛克：追记末点（无条件，不走抽稀）——移动期只按抽稀阈值采样，
+    ; 末点不补则松开前的最后一段不绘制，快速甩笔时缺口可达数十像素
+    if (EditorPending.type = "brush" || EditorPending.type = "mosaic") {
+        if EditorPending.points && EditorPending.points.Length
+            EditorPending.points.Push({x: EditorPending.x2, y: EditorPending.y2})
+    }
+    ; 画笔/马赛克：单点（仅点击无拖动）不提交
     tooSmall := (EditorPending.type = "brush" || EditorPending.type = "mosaic") && EditorPending.points.Length < 2
     ; 忽略过小区域（防误触）：丢弃时释放其缓存，避免泄漏
     if !tooSmall && (Abs(EditorPending.x2 - EditorPending.x1) > 2 || Abs(EditorPending.y2 - EditorPending.y1) > 2) {
         EditorAnnotations.Push(EditorPending)
         EditorAppendAnnotationToLayer(EditorPending)  ; 增量烘焙到标注层（只画新标注，避免整层重绘）
-    } else {
-        EditorReleaseAnnotationCache(EditorPending)
     }
     EditorPending := 0
     EditorRender()
@@ -724,8 +748,7 @@ EditorRButtonDown(wParam, lParam, msg, hwnd) {
     if (hwnd != EditorHwnd)
         return
     if EditorPending {
-        EditorReleaseAnnotationCache(EditorPending)  ; 取消进行中标注，释放其缓存
-        EditorPending := 0
+        EditorPending := 0   ; 取消进行中标注（马赛克缓存是普通 Map，随对象一并回收，无需显式释放）
         DllCall("ReleaseCapture")
         EditorRender()
     }
@@ -986,14 +1009,13 @@ EditorCreateToolbar() {
 ; ------------------------------------------------------------------
 ScreenToolbarCreateRow1(dpiFrom := 0) {
     global EditorToolbar, EditorToolbarW, EditorToolbarH
-    global EditorToolButtons, EditorToolLabels
+    global EditorToolButtons
     global ToolbarHoverActive
     global EDIT_TB_BG, EDIT_TB_SEP
     if EditorToolbar
         return EditorToolbar
     ; 防御性重置（正常流程中清理函数已清空，这里兜底防重复调用时累积）
     EditorToolButtons := Map()
-    EditorToolLabels := Map()
     ; 深色主题面板，微软雅黑字体（按钮统一 24 高：文字按钮/色块/分隔线对齐）
     EditorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
     EditorToolbar.BackColor := EDIT_TB_BG
@@ -1022,7 +1044,6 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
     for t in tools {
         c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", ToolbarToolClick.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c
-        EditorToolLabels[t[2]] := t[1]
     }
 
     ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右），点击行为由 ToolbarPhase 分流
@@ -1295,8 +1316,7 @@ EditorClear(*) {
     ; 清除前先提交进行中的文本输入（随后一并被清空）
     if EditorTextSessionActive()
         EditorTextCommit()
-    for ann in EditorAnnotations
-        EditorReleaseAnnotationCache(ann)  ; 逐个释放马赛克缓存
+    ; 标注缓存（马赛克格索引/平均色 Map）随对象一并回收，无需显式释放
     EditorAnnotations := []
     EditorBuildAnnotationLayer(EditorAnnotations)  ; 清空标注层（清除后画面立即干净，不残留旧标注）
     EditorRender()
@@ -1340,10 +1360,33 @@ EditorRestoreOverlaysForDialog() {
         EditorColorToolbar.Show("NA")
 }
 
+; ------------------------------------------------------------------
+; 编辑窗最小化 / 还原：同步覆盖层（边框 / 工具栏 / 蒙版）可见性
+; 编辑器虽无标题栏，仍可从任务栏最小化；覆盖层都是独立顶层窗口(+AlwaysOnTop)，
+; 不跟随宿主最小化，不处理就会在桌面上残留边框与工具栏（与钉屏同一根因，见 Pin.ahk 的 PinSizeChanged）。
+; 直接复用保存框那套隐藏/恢复流程（覆盖层集合完全一致，且恢复只依赖缓存坐标，不查询分层窗口位置）。
+; WM_SIZE 的 wParam：1=SIZE_MINIMIZED，0=SIZE_RESTORED，2=SIZE_MAXIMIZED；
+; 注册时机见 ShowEditor（覆盖层就绪后注册，避免初始化期间提前显现）
+; ------------------------------------------------------------------
+EditorSizeChanged(wParam, lParam, msg, hwnd) {
+    global EditorHwnd
+    if (hwnd != EditorHwnd)
+        return
+    if (wParam = 1)
+        EditorHideOverlaysForDialog()
+    else
+        EditorRestoreOverlaysForDialog()
+}
+
 EditorSave(*) {
-    global EditorResult
+    global EditorResult, EscNeed
     ; 弹系统保存对话框前临时隐藏置顶覆盖层，避免对话框被蒙版遮挡/拦截点击
     EditorHideOverlaysForDialog()
+    ; 保存框期间临时关闭 Esc 热键：否则在对话框里按 Esc 取消保存时，Esc 会被统一分发
+    ; 当成「取消编辑」而提前结束整个编辑会话（对齐选区保存框的处理）。
+    ; 这里直接 Off 而不走 EscUnregister：EscNeed 是编辑/钉屏共享的引用计数，
+    ; 多张钉屏共存时计数不归零，靠 EscUnregister 关不掉热键
+    Hotkey "Esc", "Off"
     saved := false
     filename := ""
     try {
@@ -1353,6 +1396,9 @@ EditorSave(*) {
             EditorHideWindowForSave()  ; 保存成功：立即隐藏编辑窗，屏幕恢复干净，渲染/写文件后台不可见
         }
     } finally {
+        ; 按引用计数恢复 Esc（本次只是临时关闭，不改变计数）
+        if (EscNeed > 0)
+            Hotkey "Esc", EditorEscDispatch, "On"
         ; 仅取消保存时恢复覆盖层（保持编辑状态继续编辑）；
         ; 保存成功时覆盖层保持隐藏，避免「恢复→随即销毁」的闪回与停留
         if !saved
@@ -1386,7 +1432,7 @@ EditorEscClose(*) {
 ; ------------------------------------------------------------------
 EditorCloseOverlays() {
     global EditorToolbar, EditorColorToolbar
-    global EditorToolButtons, EditorToolLabels, EditorColorSwatches, EditorSwatchFrames
+    global EditorToolButtons, EditorColorSwatches, EditorSwatchFrames
     global ToolbarHoverActive, ToolbarHoverAux
     global EditorDragging
     SetTimer EditorDragTick, 0
@@ -1410,7 +1456,6 @@ EditorCloseOverlays() {
         EditorColorToolbar := 0
     }
     EditorToolButtons := Map()
-    EditorToolLabels := Map()
     EditorColorSwatches := []
     EditorSwatchFrames := []
     EditorDragging := false
@@ -1447,14 +1492,10 @@ EditorCleanup() {
         Gdip_DisposeImage(EditorWorkBitmap)
         EditorWorkBitmap := 0
     }
-    ; 释放标注缓存（马赛克小图）与分层缓存（基础层/标注层），再释放原图
-    for ann in EditorAnnotations
-        EditorReleaseAnnotationCache(ann)
+    ; 标注集合与分层缓存（基础层/标注层）随后释放，最后释放原图；
+    ; 标注缓存是普通 Map（马赛克格索引/平均色），随对象一并回收，无需显式释放
     EditorAnnotations := []
-    if EditorPending {
-        EditorReleaseAnnotationCache(EditorPending)
-        EditorPending := 0
-    }
+    EditorPending := 0
     if EditorBgBitmap {
         Gdip_DisposeImage(EditorBgBitmap)
         EditorBgBitmap := 0
@@ -1484,6 +1525,12 @@ EditorPinInPlace() {
     global EditorGui, EditorHwnd, EditorWorkBitmap, EditorBgBitmap, EditorBaseBitmap, EditorBgBase
     global EditorAnnotations, EditorPending, EditorMaskOv, EditorBorders
     global EditorWinW, EditorWinH, EditorImgW, EditorImgH
+    global EditorCircleCursor, EditorResult
+
+    ; 防御：文本输入会话若仍活跃（正常点击工具栏会先触发 KILLFOCUS 提交），
+    ; 必须先提交再合成钉屏图，否则这段文字不进画面、Edit 覆盖窗可能残留在钉屏上
+    if EditorTextSessionActive()
+        EditorTextCommit()
 
     ; 缩放源：原图分辨率合成图（原图 + 全部标注），钉屏缩放时按它等比重绘（保证标注随缩放保留）
     resSource := EditorRenderFull()
@@ -1529,6 +1576,17 @@ EditorPinInPlace() {
     ; 不阻塞等待窗口关闭：清理挂到窗口 Close 事件（右键 / Esc → WinClose → WM_CLOSE 触发），
     ; 本函数立即返回，编辑线程随之结束，F1 热键恢复空闲，可继续截/钉下一张图（多张钉屏）
     localGui.OnEvent("Close", (*) => PinCleanupSession(localHwnd, bgBmp, bgBaseBmp, anns, pend))
+
+    ; 就地钉屏不经过 EditorCleanup，这里补做两件只属于「编辑会话」的收尾：
+    ;   1) 圆圈光标句柄只在 EditorCleanup 中释放，本路径必须自己释放，否则每次就地钉屏泄漏一个 USER 句柄；
+    ;      先切回系统箭头再销毁，避免销毁正在生效的光标（否则指针可能瞬间异常）
+    ;   2) EditorResult 复位，避免上一会话的结果残留到下一次编辑
+    if EditorCircleCursor {
+        DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32512))  ; IDC_ARROW 标准箭头
+        DllCall("DestroyCursor", "Ptr", EditorCircleCursor)
+        EditorCircleCursor := 0
+    }
+    EditorResult := ""
 }
 
 ; 钉屏会话关闭清理（Close 事件回调）：注销会话并释放全部资源（含覆盖层边框）；
@@ -1543,10 +1601,7 @@ PinCleanupSession(hwnd, bgBmp, bgBaseBmp, anns, pend) {
         try Gdip_DisposeImage(s.src)    ; 释放缩放源合成图（原图 + 标注）
         try PinRemove(hwnd)
     }
-    for ann in anns
-        try EditorReleaseAnnotationCache(ann)
-    if pend
-        try EditorReleaseAnnotationCache(pend)
+    ; anns/pend（标注集合）无需显式释放：马赛克缓存是普通 Map，随对象一并回收
     try Gdip_DisposeImage(bgBmp)
     try Gdip_DisposeImage(bgBaseBmp)
     return 0

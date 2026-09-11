@@ -148,8 +148,12 @@ HoverEaseStart(btn, fromBg, toBg, toText) {
 HoverEaseTick(st) {
     st.step++
     btn := st.btn
-    ; 工具栏可能已被销毁：安全终止并清理
-    if !WinExist("ahk_id " btn.Hwnd) {
+    ; 工具栏可能已被销毁：注意**取 btn.Hwnd 本身就会抛** "The control is destroyed"（AHK v2 已销毁控件对象），
+    ; 所以存活判断必须整体 try 兜住，异常一律按"已销毁"处理：停定时器 + 清 Map，绝不向外抛
+    ; （回归：原写法 `!WinExist("ahk_id " btn.Hwnd)` 在控件销毁后会抛错，安全网形同虚设）
+    alive := false
+    try alive := WinExist("ahk_id " btn.Hwnd) ? true : false
+    if !alive {
         SetTimer st.timer, 0
         if _HoverEase.Has(btn) && _HoverEase[btn] = st
             _HoverEase.Delete(btn)
