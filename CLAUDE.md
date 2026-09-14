@@ -166,3 +166,9 @@
 
 - 本机 PowerShell 是 5.1、CI 是 PowerShell 7，**语法与行为差异会导致"本地通过、CI 失败"**：如 `$LASTEXITCODE` 对 GUI 程序、三元运算符 `? :`（5.1 不支持）等。CI 相关改动应优先沿用工作流中已验证的写法，或在 PS 7 下验证。
 
+- **`MsgBox` 的选项串必须是 AHK 认得的写法**：图标关键字只有 `Iconx`（错误）、`Icon?`（问号）、`Icon!`（警告）、`Iconi`（信息），**没有 `IconQuestion`**。写了非法选项，`MsgBox` 直接抛 `Invalid option.`，而 `GlobalError.ahk` 的 `OnError` 处理器为防模态框阻塞脚本会 `return 1` 把异常**静默吞掉**（只写日志），表现为「界面上提示有新版本，然后毫无反应」——排查这类"静默无反应"时，**先翻日志里的 `全局异常` 记录**。凡是"用户看不到任何反馈"的交互，都别让关键动作只依赖一个可能抛错的调用。
+
+- **AHK v2 的 `Map[key]` 读「缺失键」会抛 `Item has no value.`**（不是返回空串）：读可能不存在的键必须用 `Map.Get(key, 默认值)` 或先 `Map.Has(key)` 判断。曾因此让「发布未附带 exe 资源」分支在到达判断前就抛错，同样被全局处理器吞掉。项目内已封装 `UpdateResultField()` / `PendingUpdateField()` 兜底。
+
+- **测试脚本的顶层变量都是脚本级全局**（与 `src` 下所有模块同处一个作用域）：命名必须避开 `src` 里的局部变量名（如 `btn`、`file`、`b`），否则触发 `#Warn All` 的 `LocalSameAsGlobal` 告警；测试要求 0 告警，故改名即可（如 `btn` → `updBtnCtrl`）。
+

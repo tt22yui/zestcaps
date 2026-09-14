@@ -1,8 +1,9 @@
 ; ==================================================================
 ; Updater —— GitHub Releases 自动更新（仅编译 exe 生效）
 ; 原理：异步请求 GitHub Releases API 获取最新版本号与下载地址，
-;       用 VerCompare 与本地 APP_VERSION 比较；发现新版本经弹窗确认后，
-;       下载新 exe 并校验 SHA256，再用 cmd 延迟替换同名 exe 并启动新实例。
+;       用 VerCompare 与本地 APP_VERSION 比较；发现新版本后登记为"待下载"，
+;       由设置窗口「下载并更新 vX.Y.Z」按钮或启动弹窗确认后下载新 exe 并校验 SHA256，
+;       再用 cmd 延迟替换同名 exe 并启动新实例。
 ; 入口：设置窗口「关于」页签「检查更新」按钮（见 Settings.ahk）；
 ;       启动时自动检查（编译版 + 设置开关开启时生效，见 InitStartupUpdateCheck）
 ; 关键点：
@@ -19,6 +20,50 @@ UpdaterReq      := ""        ; 当前请求对象
 UpdaterPollTimer := 0        ; 轮询定时器句柄
 UpdaterTimeoutTimer := 0     ; 超时看门狗定时器句柄
 UpdaterDlOnStatus := 0       ; 下载阶段界面状态回调（供超时看门狗也能回报，见 DownloadAndReplace）
+; 已发现、待下载的更新（Map：version / exeUrl / shaUrl）；为空表示当前没有可下载的新版本
+; 用途：启动检查发现新版本后即写入，设置窗口据此就地提供「下载并更新 vX.Y.Z」按钮，
+;       避免"只能靠一个模态弹窗下载"（弹窗被关掉或显示失败就没有任何下载入口）
+PendingUpdate := ""
+
+; ------------------------------------------------------------------
+; 记录待下载的更新信息（version / exeUrl / shaUrl）
+; ------------------------------------------------------------------
+SetPendingUpdate(version, exeUrl, shaUrl) {
+    global PendingUpdate
+    PendingUpdate := Map("version", version, "exeUrl", exeUrl, "shaUrl", shaUrl)
+}
+
+; 清除待下载状态（无更新可下载时调用）
+ClearPendingUpdate() {
+    global PendingUpdate
+    PendingUpdate := ""
+}
+
+; 是否有待下载的更新
+HasPendingUpdate() {
+    global PendingUpdate
+    return PendingUpdate is Map
+}
+
+; 取待下载更新的字段（version / exeUrl / shaUrl）；无待下载更新或字段缺失时返回 ""
+; 注：Map[key] 对**缺失键会抛 "Item has no value."**（探针实测，并非返回空串），故必须用 Get 兜底
+PendingUpdateField(key) {
+    global PendingUpdate
+    return (PendingUpdate is Map) ? PendingUpdate.Get(key, "") : ""
+}
+
+; 读取检查结果 Map 的字段；exeUrl / shaUrl 仅在发布附带 exe 资源时才存在，
+; 直接写 result["exeUrl"] 取缺失键会抛 "Item has no value."，再被全局错误处理器静默吞掉
+; （表现为"有新版本却毫无反应"）——故统一走本函数兜底
+UpdateResultField(result, key) {
+    return result.Has(key) ? result[key] : ""
+}
+
+; 更新按钮该显示的文字（纯函数，便于单测）
+; 注：不含 A_IsCompiled 判断——源码模式由界面层决定是否按此显示
+UpdateButtonLabel() {
+    return HasPendingUpdate() ? "下载并更新 v" PendingUpdateField("version") : "检查更新"
+}
 
 ; ------------------------------------------------------------------
 ; 异步检查是否有新版本（核心入口）
@@ -73,15 +118,30 @@ StartupUpdateCheckDone(result) {
         return
     }
     newVer := result["latestVersion"]
-    exeUrl := result["exeUrl"]
+    exeUrl := UpdateResultField(result, "exeUrl")
     if exeUrl = "" {
         DebugLog("更新: 发现 v" newVer "，但该发布未附带 exe 下载地址")
         return
     }
+    shaUrl := UpdateResultField(result, "shaUrl")
+    ; 先登记待下载状态：即使下面的弹窗被关掉或显示失败，设置窗口里仍有「下载并更新」按钮可用
+    SetPendingUpdate(newVer, exeUrl, shaUrl)
     DebugLog("更新: 发现新版本 v" newVer "，弹窗询问是否立即更新")
-    answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否立即下载并更新？更新完成后程序会自动重启。`n`n（可在「设置 → 关于」关闭启动时自动检查）", "ZestCaps 更新", "YesNo IconQuestion")
+    answer := ""
+    ; ⚠️ 选项串必须是 AHK 认得的写法：MsgBox 遇到非法选项会抛 "Invalid option."，而
+    ;    GlobalError.ahk 的 OnError 处理器 return 1 会把异常吞掉（只写日志、不弹错误框），
+    ;    表现为「提示有新版本之后毫无反应」。曾把图标选项误写成 IconQuestion（正确为 Icon?）
+    ;    导致更新弹窗长期静默失效。外面再套一层 try：万一弹窗构造失败也只是少个提示，
+    ;    流程不中断——待下载状态已登记，用户仍可在设置窗口点「下载并更新」。
+    try {
+        answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否立即下载并更新？更新完成后程序会自动重启。`n`n（也可稍后在「设置 → 关于」里手动更新，该页可关闭启动检查）", "ZestCaps 更新", "YesNo Icon?")
+    } catch as err {
+        DebugLog("更新: 启动更新弹窗显示失败（" err.Message "），改由设置窗口提供下载按钮")
+        return
+    }
+    DebugLog("更新: 启动更新弹窗选择=" (answer = "" ? "(空)" : answer))
     if answer = "Yes"
-        DownloadAndReplace(exeUrl, result["shaUrl"])
+        DownloadAndReplace(exeUrl, shaUrl)
 }
 
 ; 构造统一的结果 Map

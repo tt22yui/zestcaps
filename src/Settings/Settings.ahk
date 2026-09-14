@@ -213,18 +213,23 @@ OpenSettings() {
     settingsGui.Add("GroupBox", "x28 y40 w332 h64", "版本信息")
     settingsGui.Add("Text", "x44 y62 w44 h20", "版本")
     settingsGui.Add("Text", "x88 y62 w240 h20", "v" APP_VERSION "（AutoHotkey v2 · MIT）")
-    ; 自动更新分组：开关 + 手动检查（点击即反馈：不确定进度条脉冲 + 状态文本，不依赖 TrayTip）
+    ; 自动更新分组：开关 + 下载/检查按钮（点击即反馈：不确定进度条脉冲 + 状态文本，不依赖 TrayTip）
     settingsGui.Add("GroupBox", "x28 y128 w332 h116", "自动更新")
     cbAutoUpdate := settingsGui.Add("CheckBox", "x44 y146 w220 h22", "启动时自动检查更新")
     cbAutoUpdate.Value := AutoUpdateEnabled
     if !A_IsCompiled
         cbAutoUpdate.Enabled := false              ; 源码运行不支持自动更新，禁用避免误导
-    btnUpdate := settingsGui.Add("Button", "x44 y176 w120 h26", "检查更新")
-    settingsGui.Add("Text", "x172 y182 w160 h18", "自动从 GitHub 最新仓库更新")
+    ; 按钮宽度按最长的「下载并更新 vX.Y.Z」留足，避免中文标签被截断
+    btnUpdate := settingsGui.Add("Button", "x44 y176 w150 h26", "检查更新")
+    settingsGui.Add("Text", "x202 y182 w150 h18", "自动从 GitHub 更新")
     updProg := settingsGui.Add("Progress", "x44 y208 w300 h8", 0)
     updProg.Visible := false                       ; 默认隐藏，点击后才显示脉冲
     updStatus := settingsGui.Add("Text", "x44 y222 w300 h20", (A_IsCompiled ? "点击「检查更新」查看 GitHub 是否发布新版本" : "自动更新仅编译版可用（源码运行不检查网络）"))
     btnUpdate.OnEvent("Click", (*) => HandleUpdateClick(btnUpdate, updProg, updStatus))
+    ; 已有待下载更新时（例如启动检查刚发现新版本）直接显示下载入口，不用再点一次检查
+    RefreshUpdateButton(btnUpdate)
+    if A_IsCompiled && HasPendingUpdate()
+        updStatus.Text := "发现新版本 v" PendingUpdateField("version") "，点按钮即可下载"
 
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
@@ -240,11 +245,18 @@ OpenSettings() {
 }
 
 ; ==================================================================
-; 「检查更新」交互：点击即反馈 + 异步检查 + GUI 状态展示
-; 反馈不依赖 TrayTip（系统通知可能被忽略），改用窗口内进度条与状态文本
+; 「检查更新 / 下载并更新」交互：点击即反馈 + 异步检查 + GUI 状态展示
+; 反馈不依赖 TrayTip（系统通知可能被忽略），改用窗口内进度条、状态文本与按钮文字
 ; ==================================================================
 
-; 「检查更新」按钮点击处理：源码模式直接提示；否则立即显示"正在检查"并异步发起
+; 按待下载状态刷新按钮文字：有更新 → 「下载并更新 vX.Y.Z」，否则「检查更新」
+; 注：源码模式的检查恒为"无需更新"（见 CheckForUpdateAsync），不会出现下载入口；
+;     万一有待下载状态（仅测试会人为注入），点击也会被 HandleUpdateClick 拦成"仅编译版可用"
+RefreshUpdateButton(btnUpdate) {
+    btnUpdate.Text := UpdateButtonLabel()
+}
+
+; 「更新」按钮点击处理：已发现新版本则直接下载，否则发起检查
 HandleUpdateClick(btnUpdate, updProg, updStatus) {
     if !A_IsCompiled {
         updStatus.Text := "自动更新仅编译版可用（源码运行不检查网络）"
@@ -253,6 +265,11 @@ HandleUpdateClick(btnUpdate, updProg, updStatus) {
     ; 防止重复点击
     if !btnUpdate.Enabled
         return
+    ; 已有待下载的更新（按钮此刻就是「下载并更新 vX.Y.Z」）：直接下载，不再重新检查
+    if HasPendingUpdate() {
+        DownloadAndReplaceResult(PendingUpdateField("exeUrl"), PendingUpdateField("shaUrl"), updStatus, btnUpdate)
+        return
+    }
     btnUpdate.Enabled := false
     btnUpdate.Text := "检查中…"
     updProg.Value := 0
@@ -265,43 +282,52 @@ HandleUpdateClick(btnUpdate, updProg, updStatus) {
     CheckForUpdateAsync((r) => HandleUpdateDone(btnUpdate, updProg, updStatus, r, pulse))
 }
 
-; 处理异步检查结果：停动画、更新状态文本；发现新版则弹窗确认下载
+; 处理异步检查结果：停动画、更新状态文本
+; 发现新版本 → 登记为待下载并把按钮就地变成「下载并更新 vX.Y.Z」，
+; 刻意不用模态弹窗：旧实现弹 Yes/No 确认框，弹窗一旦被关掉/显示失败就没有任何下载入口了
 HandleUpdateDone(btnUpdate, updProg, updStatus, result, pulse) {
     global APP_VERSION
     SetTimer pulse, 0
     updProg.Value := 100
-    btnUpdate.Enabled := true
-    btnUpdate.Text := "检查更新"
     if result["error"] != "" {
+        btnUpdate.Enabled := true
+        RefreshUpdateButton(btnUpdate)
         updStatus.Text := "检查失败：" result["error"]
         return
     }
     if !result["needUpdate"] {
+        btnUpdate.Enabled := true
+        RefreshUpdateButton(btnUpdate)
         updStatus.Text := "已是最新版本 v" APP_VERSION
         return
     }
     newVer := result["latestVersion"]
-    exeUrl := result["exeUrl"]
+    exeUrl := UpdateResultField(result, "exeUrl")
     if exeUrl = "" {
+        btnUpdate.Enabled := true
+        RefreshUpdateButton(btnUpdate)
         updStatus.Text := "发现新版本 v" newVer "，但未找到下载文件"
         return
     }
-    updStatus.Text := "发现新版本 v" newVer
-    answer := MsgBox("发现新版本 v" newVer "（当前 v" APP_VERSION "）`n`n是否下载并更新？更新完成后将自动重启。", "ZestCaps 更新", "YesNo IconQuestion")
-    if answer = "Yes"
-        DownloadAndReplaceResult(exeUrl, result["shaUrl"], updStatus, btnUpdate)
+    SetPendingUpdate(newVer, exeUrl, UpdateResultField(result, "shaUrl"))
+    btnUpdate.Enabled := true
+    RefreshUpdateButton(btnUpdate)
+    updStatus.Text := "发现新版本 v" newVer "（当前 v" APP_VERSION "），点按钮下载"
+    DebugLog("更新: 发现新版本 v" newVer "，已就地提供下载按钮")
 }
 
 ; 下载并替换；把下载/校验/替换过程中的状态与失败原因回写到窗口
 ; （此前失败只走 TrayTip、界面永远停在"正在下载更新…"，用户看不到任何反馈＝以为"只检查不更新"）
 DownloadAndReplaceResult(exeUrl, shaUrl, updStatus, btnUpdate) {
     updStatus.Text := "正在下载更新…完成后将自动替换并重启。"
+    btnUpdate.Enabled := false
+    btnUpdate.Text := "下载中…"
     ; Download 是同步阻塞调用，这里先让上面的文本真正画出来（Sleep 期间 AHK 会处理窗口消息）
     Sleep 60
     ok := DownloadAndReplace(exeUrl, shaUrl, (msg) => (updStatus.Text := msg, updStatus.Redraw()))
     if !ok {
-        ; 失败：恢复按钮，让用户可直接重试（换网络/稍后再试）
+        ; 失败：恢复按钮让用户可直接重试（待下载状态仍在，故按钮仍是「下载并更新 vX.Y.Z」）
         btnUpdate.Enabled := true
-        btnUpdate.Text := "检查更新"
+        RefreshUpdateButton(btnUpdate)
     }
 }

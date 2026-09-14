@@ -225,6 +225,49 @@ class UpdaterUnitTest {
         Yunit.Assert(holder.msgs.Length = 1 && holder.msgs[1] = "阶段一", "状态文本应回写给回调")
     }
 
+    ; -------- 待下载更新状态与按钮文字 --------
+    ; 回归背景：旧实现靠「检查更新」里的 Yes/No 模态框下载，弹窗一旦被关掉或显示失败，
+    ; 界面上就再没有任何下载入口（曾因选项串误写 IconQuestion 使 MsgBox 抛 Invalid option.，
+    ; 又被 GlobalErrorHandler 静默吞掉 → 用户看到"提示有新版本，然后毫无反应"）。
+    ; 现在发现新版本即登记为"待下载"，由设置窗口按钮就地提供下载入口。
+    test_待下载状态与按钮文字() {
+        ClearPendingUpdate()
+        Yunit.Assert(!HasPendingUpdate(), "初始应无待下载更新")
+        Yunit.Assert(UpdateButtonLabel() = "检查更新", "无待下载更新时按钮应为「检查更新」，实际: [" UpdateButtonLabel() "]")
+        Yunit.Assert(PendingUpdateField("exeUrl") = "", "无待下载更新时取字段应返回空串")
+
+        SetPendingUpdate("9.9.9", "https://example.com/a.exe", "https://example.com/a.exe.sha256")
+        Yunit.Assert(HasPendingUpdate(), "登记后应处于待下载状态")
+        Yunit.Assert(UpdateButtonLabel() = "下载并更新 v9.9.9", "有更新时按钮应变成下载入口，实际: [" UpdateButtonLabel() "]")
+        Yunit.Assert(PendingUpdateField("version") = "9.9.9", "version 应可读回，实际: [" PendingUpdateField("version") "]")
+        Yunit.Assert(PendingUpdateField("exeUrl") = "https://example.com/a.exe", "exeUrl 应可读回，实际: [" PendingUpdateField("exeUrl") "]")
+        Yunit.Assert(PendingUpdateField("shaUrl") = "https://example.com/a.exe.sha256", "shaUrl 应可读回，实际: [" PendingUpdateField("shaUrl") "]")
+        Yunit.Assert(PendingUpdateField("无此键") = "", "未知键应返回空串而不是报错")
+
+        ; 后一次检查结果覆盖前一次（用户连点"检查更新"时应指向最新发现的版本）
+        SetPendingUpdate("9.9.10", "https://example.com/b.exe", "")
+        Yunit.Assert(UpdateButtonLabel() = "下载并更新 v9.9.10", "再次登记应覆盖为最新版本，实际: [" UpdateButtonLabel() "]")
+
+        ClearPendingUpdate()
+        Yunit.Assert(!HasPendingUpdate(), "清除后不应再是待下载状态")
+        Yunit.Assert(UpdateButtonLabel() = "检查更新", "清除后按钮应回到「检查更新」，实际: [" UpdateButtonLabel() "]")
+    }
+
+    test_结果字段缺失不抛错() {
+        ; 回归：ParseGithubRelease 在"发布未附带 exe 资源"时不写 exeUrl / shaUrl，
+        ; 而 Map[key] 取缺失键会抛 "Item has no value."（并非返回空串，探针实测），
+        ; 该异常会被 GlobalErrorHandler 静默吞掉 → 用户看到"有新版本却毫无反应"。
+        ; 故统一走 UpdateResultField 兜底返回空串。
+        r := NewUpdateResult("", "0.3.2", false)   ; 仅含 latestVersion/currentVersion/needUpdate/error
+        Yunit.Assert(!r.Has("exeUrl"), "前置：NewUpdateResult 不含 exeUrl")
+        Yunit.Assert(UpdateResultField(r, "exeUrl") = "", "缺失的 exeUrl 应返回空串，实际: [" UpdateResultField(r, "exeUrl") "]")
+        Yunit.Assert(UpdateResultField(r, "shaUrl") = "", "缺失的 shaUrl 应返回空串，实际: [" UpdateResultField(r, "shaUrl") "]")
+        Yunit.Assert(UpdateResultField(r, "error") = "", "已存在的字段应正常读回")
+        Yunit.Assert(UpdateResultField(r, "latestVersion") = "", "已存在的空值字段应读回空串")
+        r["exeUrl"] := "https://example.com/a.exe"
+        Yunit.Assert(UpdateResultField(r, "exeUrl") = "https://example.com/a.exe", "存在的字段应读回原值，实际: [" UpdateResultField(r, "exeUrl") "]")
+    }
+
     ; -------- SHA256Hex --------
     test_SHA256已知向量abc() {
         ; 精确 3 字节：ASCII "abc"（61 62 63），无 BOM、无换行
