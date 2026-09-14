@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-14
+
+自动更新「只检查不更新」修复与 CI 发布链路加固。
+
+### 修复
+
+- **「启动时自动检查更新」开关完全无效**：该开关只被 GUI 读写，全仓库没有任何启动检查逻辑
+  （`CheckForUpdateAsync` 只有手动按钮一个调用点），README 却写着「启动时自动检查」；
+  现按此实现——启动延迟 1.5 秒静默检查（异步不阻塞启动），已最新或检查失败都不打扰，
+  发现新版本才弹窗询问是否立即更新；入口为 `Main.ahk` 的 `InitStartupUpdateCheck()`，
+  关闭方式仍是设置 → 关于 → 取消勾选。
+- **更新失败没有任何可见反馈**：校验不符 / 下载异常 / 启动失败 / 超时四条失败路径此前只弹 `TrayTip`
+  （易被系统焦点助手忽略），设置窗口状态文本永远停在「正在下载更新…」，用户看到的就是「点完没反应」；
+  现新增 `onStatus` 回调把进度与每条失败原因回写窗口，失败后恢复「检查更新」按钮以便重试，
+  超时看门狗也会先提示再退出（GUI 侧补 `Sleep`，让「正在下载…」在同步下载阻塞前真正画出来）。
+- **更新链路零日志**：现全链路写 `DebugLog`（发起请求 / HTTP 状态 / 版本比对 / 是否需要更新 /
+  下载开始与完成 / SHA256 对比结果 / 替换命令 / 每条失败原因），更新不生效时可直接查日志定位。
+- **API 请求未带 `User-Agent`**：GitHub REST API 对缺少 UA 的请求返回 403，现显式设置。
+
+### 工程
+
+- CI 「全链路语法校验」与「编译 exe」步骤取不到退出码：`AutoHotkey64.exe` / `Ahk2Exe.exe` 均为
+  GUI 子系统程序，PowerShell 下用 `&` 调用时 `$LASTEXITCODE` 为空，空值参与 `-ne 0` 恒为真，
+  把「命令没跑起来」误报成「校验失败」（v0.3.4 首次发布即卡在此步）；现改用
+  `Start-Process -Wait -PassThru` 读真实退出码，失败诊断改为 `Write-Host + exit` 并打印解释器路径、
+  退出码与 AHK 自身输出。
+- CI 修正 `Ahk2Exe` 获取方式：官方 ZIP 只含解释器、不含 `Compiler\Ahk2Exe.exe`（只有安装版才有），
+  改为依次尝试解释器同级/上级与递归搜索、运行器已装 AutoHotkey、最后从官方 Release 下载 ZIP
+  （与安装版 `UX\install-ahk2exe.ahk` 同一路数），全部失败则打印所有尝试路径。
+- Ahk2Exe 路径参数显式加引号（数组式 `-ArgumentList` 不自动加引号，含空格的安装路径会被截断）；
+  解释器改为步骤内解析，去掉跨步骤环境变量耦合。
+- 新增 `test\Updater\test_unit_updater.ahk` 用例：`CheckForUpdateAsync` 在源码模式必须同步回调
+  `needUpdate=false`（绝不触网）、`InitStartupUpdateCheck` 在源码模式不排程不发起请求、
+  `UpdaterReportStatus` 在有回调时把状态文本交给回调。
+- README 中/英：说明启动静默检查的打扰策略，以及失败原因会显示在设置窗口。
+
 ## [0.3.4] - 2026-09-11
 
 截图/钉屏与配置健壮性修复，测试与发布链路加固。
@@ -179,7 +215,8 @@
 - 基于 AutoHotkey v2，绿色免安装；`build.bat` 可编译为独立 `zestcaps.exe`
 - 全局未捕获错误处理与调试日志，配备按键看门狗防假死
 
-[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.5
 [0.3.4]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.4
 [0.3.3]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.3
 [0.3.2]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.2
