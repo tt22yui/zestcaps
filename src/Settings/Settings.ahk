@@ -14,13 +14,25 @@
 ; 越界输入由 UpDown 的 Range 自动钳制到合法区间
 ; ==================================================================
 
-; 读取「时/分」两个 UpDown 编辑框，拼成 24 时制 "HH:mm"（补零）
-; 非数字输入返回空串，交由 ValidateRecycleBin 报错：整数转换对非数字会抛异常，
-; 而本函数在保存流程里先于 try 执行，裸抛会被全局兜底吞掉（界面表现为「点保存没反应」）
-ReadRBTime(hourEdit, minEdit) {
-    if !IsNumber(hourEdit.Value) || !IsNumber(minEdit.Value)
+; 由「时」「分」两栏文本拼 24 时制 "HH:mm"（补零）；非法返回空串（纯函数，便于单测）
+; ⚠️ 判断「是不是数字」必须用 IsIntText（正则）而不是内置 IsNumber()：
+;    src\Common\Gdip_All_v2.ahk 自定义了同名 IsNumber（v2 `is number` 语义，只认数字类型），
+;    会覆盖内置版本，用它判断控件文本会恒为假——这正是「保存设置总是报清空时刻格式错误」的根因。
+; 归一化（去空白 + 全角转半角）先行：中文输入法下很容易把 ０９ 这种全角数字打进框里
+BuildClockTime(hourText, minuteText) {
+    h := NormalizeDigits(hourText)
+    mi := NormalizeDigits(minuteText)
+    if !IsIntText(h) || !IsIntText(mi)
         return ""
-    return Format("{:02}:{:02}", Integer(hourEdit.Value), Integer(minEdit.Value))
+    return Format("{:02}:{:02}", Integer(h), Integer(mi))
+}
+
+; 读取「时/分」两个 Edit（UpDown 伴生框）并拼成时刻；非法时写日志（原始内容）便于排查
+ReadRBTime(hourEdit, minEdit) {
+    built := BuildClockTime(hourEdit.Value, minEdit.Value)
+    if built = ""
+        DebugLog("设置: 时刻控件值非法 hour=[" hourEdit.Value "] min=[" minEdit.Value "]")
+    return built
 }
 
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
@@ -80,11 +92,13 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
 ; 合法返回空串，非法返回错误信息
 ValidateRecycleBin(keepDays, time) {
     if !RegExMatch(time, "^(\d{1,2}):(\d{2})$", &m)
-        return "清空时刻格式错误，请用 24 小时制 HH:mm（如 12:30）"
+        ; 报错带上实际读到的内容：便于用户/排查者一眼看出是空、全角数字还是别的字符
+        return "清空时刻格式错误：当前读到 [" time "]，请用 24 小时制 HH:mm（如 12:30）`n「时」「分」两栏请填半角数字（0-23 与 0-59），勿留空"
     ; 仅校验格式无法拦截 99:99，超出范围会排出错误的定时（RecycleBin.ahk 按字符串拼接执行时刻）
     if (Integer(m[1]) > 23 || Integer(m[2]) > 59)
         return "清空时刻超出范围，请填写 00:00 - 23:59"
-    if !IsNumber(keepDays)
+    ; 同样用 IsIntText 而非内置 IsNumber（后者被 Gdip 库同名函数覆盖，判断数字字符串恒为假）
+    if !IsIntText(keepDays)
         return "保留天数需为数字"
     if Integer(keepDays) < 1
         return "保留天数需至少为 1 天"

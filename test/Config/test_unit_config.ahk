@@ -46,6 +46,39 @@ class ConfigUnitTest {
         Yunit.Assert(PastePlainEnabled = 0 || PastePlainEnabled = 1, "PastePlainEnabled 应为 0/1")
         Yunit.Assert(StartupEnabled = 0 || StartupEnabled = 1, "StartupEnabled 应为 0/1")
     }
+
+    test_数字文本归一化() {
+        ; 中文输入法下很容易把全角数字打进设置窗口：全角既不是数字类型、正则 \d 也不匹配，
+        ; 不归一化会误报「清空时刻格式错误」（用户实测反馈）
+        Yunit.Assert(!IsIntText("０９"), "前提：全角数字不是合法整数文本（误报根源之一）")
+        Yunit.Assert(NormalizeDigits("０９：００") = "09:00", "全角数字与全角冒号应转半角")
+        Yunit.Assert(NormalizeDigits("０９") = "09", "全角数字应转半角")
+        Yunit.Assert(NormalizeDigits(" 9 ") = "9", "应去首尾空白")
+        Yunit.Assert(NormalizeDigits("12:00") = "12:00", "半角内容应原样返回")
+        Yunit.Assert(NormalizeDigits("") = "", "空串仍为空串")
+        Yunit.Assert(NormalizeDigits("abc") = "abc", "非数字内容原样返回")
+    }
+
+    test_整数文本判定() {
+        ; ⚠️ 不能用内置 IsNumber 判断字符串：Gdip 库同名函数会覆盖它（见 test_unit_settings.ahk）
+        Yunit.Assert(IsIntText("09"), "数字字符串应判为整数文本")
+        Yunit.Assert(IsIntText(" 30 "), "含空白应判为整数文本")
+        Yunit.Assert(IsIntText("-1"), "负号应被接受")
+        Yunit.Assert(!IsIntText(""), "空串不是整数文本")
+        Yunit.Assert(!IsIntText("abc"), "非数字不是整数文本")
+        Yunit.Assert(!IsIntText("1.5"), "小数不是整数文本")
+        Yunit.Assert(!IsIntText("０９"), "全角数字不是整数文本（需先归一化）")
+    }
+
+    test_时刻规范化() {
+        Yunit.Assert(NormalizeClockTime("9:05", "12:00") = "09:05", "未补零应补零")
+        Yunit.Assert(NormalizeClockTime("０９：００", "12:00") = "09:00", "全角应归一化后再解析")
+        Yunit.Assert(NormalizeClockTime("23:59", "12:00") = "23:59", "范围内应保留")
+        Yunit.Assert(NormalizeClockTime("24:00", "12:00") = "12:00", "超范围应回退默认")
+        Yunit.Assert(NormalizeClockTime("99:99", "12:00") = "12:00", "非法应回退默认")
+        Yunit.Assert(NormalizeClockTime("abc", "12:00") = "12:00", "非数字应回退默认")
+        Yunit.Assert(NormalizeClockTime("", "12:00") = "12:00", "空值应回退默认")
+    }
 }
 
 ; ---- 运行入口（单跑或由 run_all_tests.ahk 调用）----

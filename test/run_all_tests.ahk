@@ -18,6 +18,7 @@ tests := [
     "Clipboard\test_unit_clipboard.ahk",
     "Updater\test_unit_updater.ahk",
     "RecycleBin\test_unit_recyclebin.ahk",
+    "Settings\test_unit_settings.ahk",
     "Screenshot\test_unit_dblclick.ahk",
 ]
 

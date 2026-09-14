@@ -219,11 +219,20 @@ DEBUG_LOG_MAX_SIZE_KB := 800
 ; 一旦抛出即弹模态错误框并中断整个脚本启动（托盘/热键全部失效），必须在此层拦截
 ; ==================================================================
 
+; 判断文本是否为整数写法（可选负号 + 数字），纯正则实现
+; ⚠️ 不要用内置 IsNumber()/IsInteger() 判断字符串：src\Common\Gdip_All_v2.ahk 末尾
+;    自定义了同名函数（v2 的 `is number` 语义），会**覆盖内置版本**，只认数字类型、
+;    不认 "09" 这类数字字符串，导致「文本是数字」的判断恒为假。
+;    该坑曾造成：设置窗口每次保存都报「清空时刻格式错误」、ini 里的整数配置被静默替换成默认值。
+IsIntText(s) {
+    return RegExMatch(s, "^\s*-?\d+\s*$") ? true : false
+}
+
 ; 读取整数配置项：缺失 / 空值 / 非数字 / 读取异常均回退到 fallback
 IniReadInt(filename, section, key, fallback) {
     try {
         raw := IniRead(filename, section, key, fallback)
-        if IsNumber(raw)
+        if IsIntText(raw)
             return Integer(raw)
     }
     return Integer(fallback)
@@ -239,10 +248,30 @@ IniReadText(filename, section, key, fallback) {
     return fallback
 }
 
+; 数字文本归一化：去首尾空白 + 全角数字/全角冒号转半角
+; 为什么需要：中文输入法状态下往输入框里键入很容易打出全角数字（０９），
+; 而归一化前的文本既不是数字类型、正则 \d 也不匹配全角，会导致校验误报「格式错误」；
+; 手改 config.ini 时同样可能带全角字符
+NormalizeDigits(s) {
+    s := Trim(s, " `t")
+    out := ""
+    loop StrLen(s) {
+        code := Ord(SubStr(s, A_Index, 1))
+        if (code >= 0xFF10 && code <= 0xFF19)          ; 全角 ０-９
+            out .= Chr(code - 0xFF10 + 0x30)
+        else if (code = 0xFF1A)                        ; 全角 ：
+            out .= ":"
+        else
+            out .= Chr(code)
+    }
+    return out
+}
+
 ; 规范化每日执行时刻为补零的 "HH:mm"（兼容 "9:05" 这类写法）；非法值回退默认值
 NormalizeClockTime(raw, fallback) {
     try {
-        if RegExMatch(raw, "^(\d{1,2}):(\d{1,2})$", &m) {
+        normalized := NormalizeDigits(raw)
+        if RegExMatch(normalized, "^(\d{1,2}):(\d{1,2})$", &m) {
             hour := Integer(m[1]), minute := Integer(m[2])
             if (hour <= 23 && minute <= 59)
                 return Format("{:02}:{:02}", hour, minute)
