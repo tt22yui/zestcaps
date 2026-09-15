@@ -2,7 +2,7 @@
 
 > **[简体中文](README.md) | English**
 
-> v0.3.4 — [MIT License](LICENSE)
+> v0.3.7 — [MIT License](LICENSE)
 
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -129,7 +129,10 @@ build.bat               Build script (outputs output\zestcaps_v<version>.exe)
 ## Configuration
 
 - `config.ini`: feature toggles and configurable hotkeys
-  - Initial feature toggle states (`IndicatorEnabled`, `PastePlainEnabled`, `ScreenshotEnabled`, `SplashEnabled`, `StartupEnabled`, `DesktopShortcutEnabled`, `RecycleBinEnabled`, `AutoUpdateEnabled`), written back automatically when saving in the settings window
+  - Initial feature toggle states, written back automatically when saving in the settings window (note the sections: `IndicatorEnabled` lives in `[Indicator]`, the rest in `[Features]`, recycle bin params in `[RecycleBin]`):
+    - `[Indicator]`: `IndicatorEnabled`
+    - `[Features]`: `PastePlainEnabled`, `ScreenshotEnabled`, `SplashEnabled`, `StartupEnabled`, `DesktopShortcutEnabled`, `RecycleBinEnabled`, `AutoUpdateEnabled`
+    - `[RecycleBin]`: `KeepDays` (retention days), `Time` (daily execution time `HH:mm`)
   - Configurable hotkeys (`[Hotkeys]` section: `PastePlain`, `Screenshot`), fill in AHK-native format directly in the settings window "hotkeys" text boxes (e.g. `^v`, `F1`); effective after save & restart
 - `src\Config\Config.ahk`: remaining hardcoded parameters
   - Menu text (`MENU_TITLE`, `MENU_SETTINGS`, `MENU_RESTART`, `MENU_EXIT`)

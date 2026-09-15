@@ -2,7 +2,7 @@
 
 > **简体中文 | [English](README.en.md)**
 
-> v0.3.4 — [MIT License](LICENSE)
+> v0.3.7 — [MIT License](LICENSE)
 
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -129,7 +129,10 @@ build.bat                编译脚本（输出 output\zestcaps_v<版本>.exe）
 ## 配置说明
 
 - `config.ini`：功能开关与可配置快捷键
-  - 功能开关初始状态（`IndicatorEnabled`、`PastePlainEnabled`、`ScreenshotEnabled`、`SplashEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`、`RecycleBinEnabled`、`AutoUpdateEnabled`），设置窗口保存时自动写回
+  - 功能开关初始状态，设置窗口保存时自动写回（注意分段：`IndicatorEnabled` 在 `[Indicator]` 段，其余开关在 `[Features]` 段，回收站参数在 `[RecycleBin]` 段）：
+    - `[Indicator]` 段：`IndicatorEnabled`
+    - `[Features]` 段：`PastePlainEnabled`、`ScreenshotEnabled`、`SplashEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`、`RecycleBinEnabled`、`AutoUpdateEnabled`
+    - `[RecycleBin]` 段：`KeepDays`（保留天数）、`Time`（每日执行时刻 `HH:mm`）
   - 可配置快捷键（`[Hotkeys]` 段：`PastePlain`、`Screenshot`），在设置窗口「快捷键」文本框直接填写 AHK 原生格式（如 `^v`、`F1`），保存后重启生效
 - `src\Config\Config.ahk`：其余参数硬编码
   - 菜单文字（`MENU_TITLE`、`MENU_SETTINGS`、`MENU_RESTART`、`MENU_EXIT`）
