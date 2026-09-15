@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **第三方库 `Gdip_All_v2.ahk` 覆盖 AHK 内置 `IsNumber`/`IsInteger`**：库内同名函数会静默顶掉内置版本
+  （只认数字类型、不认 `"09"` 这类数字字符串），曾在真实运行环境（加载 Gdip 后）造成设置窗口
+  「保存设置总是报清空时刻格式错误」、`config.ini` 整数配置被静默回退默认值。现将库内函数改名
+  `Gdip_IsNumber`/`Gdip_IsInteger`，从源头消除覆盖，并同步更新相关注释与单测。
+
 ## [0.3.7] - 2026-09-14
 
 自动更新「提示有新版本却毫无反应」的根因修复，下载入口改为常驻按钮。
@@ -255,7 +262,9 @@
 - 基于 AutoHotkey v2，绿色免安装；`build.bat` 可编译为独立 `zestcaps.exe`
 - 全局未捕获错误处理与调试日志，配备按键看门狗防假死
 
-[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.7
+[0.3.6]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.6
 [0.3.5]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.5
 [0.3.4]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.4
 [0.3.3]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.3

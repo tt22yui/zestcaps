@@ -15,9 +15,9 @@
 ; ==================================================================
 
 ; 由「时」「分」两栏文本拼 24 时制 "HH:mm"（补零）；非法返回空串（纯函数，便于单测）
-; ⚠️ 判断「是不是数字」必须用 IsIntText（正则）而不是内置 IsNumber()：
-;    src\Common\Gdip_All_v2.ahk 自定义了同名 IsNumber（v2 `is number` 语义，只认数字类型），
-;    会覆盖内置版本，用它判断控件文本会恒为假——这正是「保存设置总是报清空时刻格式错误」的根因。
+; ⚠️ 判断「是不是数字」统一用 IsIntText（正则，只认可选负号的十进制整数）：
+;    不要用内置 IsNumber()——它接受 "1.5"/"1e3" 等写法；且历史上 Gdip 库同名覆盖过内置版本
+;    （现已改名 Gdip_IsNumber 修复），曾导致「保存设置总是报清空时刻格式错误」。
 ; 归一化（去空白 + 全角转半角）先行：中文输入法下很容易把 ０９ 这种全角数字打进框里
 BuildClockTime(hourText, minuteText) {
     h := NormalizeDigits(hourText)
@@ -97,7 +97,7 @@ ValidateRecycleBin(keepDays, time) {
     ; 仅校验格式无法拦截 99:99，超出范围会排出错误的定时（RecycleBin.ahk 按字符串拼接执行时刻）
     if (Integer(m[1]) > 23 || Integer(m[2]) > 59)
         return "清空时刻超出范围，请填写 00:00 - 23:59"
-    ; 同样用 IsIntText 而非内置 IsNumber（后者被 Gdip 库同名函数覆盖，判断数字字符串恒为假）
+    ; 同样用 IsIntText 而非内置 IsNumber（统一只认十进制整数写法，避免 "1.5" 等被误收）
     if !IsIntText(keepDays)
         return "保留天数需为数字"
     if Integer(keepDays) < 1

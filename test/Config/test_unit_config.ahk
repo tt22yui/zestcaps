@@ -60,7 +60,7 @@ class ConfigUnitTest {
     }
 
     test_整数文本判定() {
-        ; ⚠️ 不能用内置 IsNumber 判断字符串：Gdip 库同名函数会覆盖它（见 test_unit_settings.ahk）
+        ; 统一用 IsIntText（只认十进制整数）而非内置 IsNumber（会接受 "1.5"/"1e3" 等）
         Yunit.Assert(IsIntText("09"), "数字字符串应判为整数文本")
         Yunit.Assert(IsIntText(" 30 "), "含空白应判为整数文本")
         Yunit.Assert(IsIntText("-1"), "负号应被接受")

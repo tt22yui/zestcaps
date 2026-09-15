@@ -3,12 +3,12 @@
 ; 覆盖：BuildClockTime（纯函数）、ValidateRecycleBin、IniReadInt（整数配置读取）
 ;
 ; 重点回归（本文件的 include 特意包含 Gdip）：
-;   src\Common\Gdip_All_v2.ahk 末尾自定义了 IsNumber/IsInteger，**覆盖 AHK 内置同名函数**，
-;   其 v2 `is number` 语义只认数字类型、不认 "09" 这类数字字符串。
-;   曾因此出现两个真实故障：
+;   src\Common\Gdip_All_v2.ahk 曾自定义 IsNumber/IsInteger 并**覆盖 AHK 内置同名函数**
+;   （只认数字类型、不认 "09" 这类数字字符串），曾导致两个真实故障：
 ;     1) 设置窗口点「保存并重启」总是报「清空时刻格式错误」（ReadRBTime 用 IsNumber 判断控件文本）；
 ;     2) ini 里的整数配置被静默替换成默认值（IniReadInt 同样用了 IsNumber）。
-;   本测试包含 Gdip 以复现真实运行环境，确保这两处不再依赖 IsNumber。
+;   现库内已改用 Gdip_IsNumber/Gdip_IsInteger 前缀，不再覆盖内置；本测试在真实环境（含 Gdip）下
+;   验证：① 内置 IsNumber 已恢复原语义；② 上述两处逻辑统一走 IsIntText 判定。
 ;
 ; 单跑：AutoHotkey64 test\Settings\test_unit_settings.ahk
 ; 聚合：AutoHotkey64 test\run_all_tests.ahk
@@ -30,18 +30,18 @@ DEBUG_LOG_ENABLED := false     ; 屏蔽日志写入
 #Include "..\..\src\Hotkeys\Hotkeys.ahk"
 #Include "..\..\src\Updater\Updater.ahk"
 ; 按 Main.ahk 的真实顺序补齐 Clipboard / Screenshot（Gdip 由 Screenshot 链式引入）：
-; 一是让本测试运行在真实环境（Gdip 的 IsNumber 覆盖生效），
+; 一是让本测试运行在真实环境（含 Gdip 库），
 ; 二是避免 Hotkeys.ahk 里对 PastePlain/SelectRegionToCapture 的跨模块误报告警
 #Include "..\..\src\Clipboard\Clipboard.ahk"
 #Include "..\..\src\Screenshot\Screenshot.ahk"
-#Include "..\..\src\Common\Gdip_All_v2.ahk"   ; 关键：引入会覆盖 IsNumber 的库（显式声明依赖）
+#Include "..\..\src\Common\Gdip_All_v2.ahk"   ; 显式引入 Gdip（验证它不再覆盖内置 IsNumber/IsInteger）
 #Include "..\..\src\Settings\Settings.ahk"
 
 class SettingsUnitTest {
-    test_Gdip覆盖了内置IsNumber() {
-        ; 前置事实（本测试的立足点）：Gdip 的同名 IsNumber 生效，只认数字类型
-        Yunit.Assert(IsNumber(9), "数字类型应被 IsNumber 接受")
-        Yunit.Assert(!IsNumber("09"), "Gdip 覆盖版 IsNumber 不接受数字字符串（曾经的误报根源）")
+    test_Gdip不再覆盖内置数字判断() {
+        ; 回归：Gdip 库改用 Gdip_ 前缀后，AHK 内置 IsNumber/IsInteger 应恢复原始语义
+        Yunit.Assert(IsNumber(9), "内置 IsNumber 应接受数字类型")
+        Yunit.Assert(IsNumber("09"), "内置 IsNumber 应接受数字字符串（不再被 Gdip 覆盖）")
         Yunit.Assert(IsIntText("09"), "IsIntText（正则实现）应接受数字字符串")
         Yunit.Assert(!IsIntText("０９"), "IsIntText 不接受全角数字（需 NormalizeDigits 先行归一化）")
     }

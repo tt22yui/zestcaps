@@ -341,7 +341,7 @@ Gdip_BitmapFromScreen(Screen:=0, Raster:="")
 		_x := _y := 0
 		hhdc := GetDCEx(Screen, 3)
 	}
-	else if IsInteger(Screen)
+	else if Gdip_IsInteger(Screen)
 	{
 		M := GetMonitorInfo(Screen)
 		_x := M.Left, _y := M.Top, _w := M.Right-M.Left, _h := M.Bottom-M.Top
@@ -1283,7 +1283,7 @@ Gdip_DrawImagePointsRect(pGraphics, pBitmap, Points, sx:="", sy:="", sw:="", sh:
 		Numput("float", Coord[1],PointF, 8*(A_Index-1)), Numput("float", Coord[2],PointF, (8*(A_Index-1))+4)
 	}
 
-	if !IsNumber(Matrix)
+	if !Gdip_IsNumber(Matrix)
 		ImageAttr := Gdip_SetImageAttributesColorMatrix(Matrix)
 	else if (Matrix != 1)
 		ImageAttr := Gdip_SetImageAttributesColorMatrix("1|0|0|0|0|0|1|0|0|0|0|0|1|0|0|0|0|0|" Matrix "|0|0|0|0|0|1")
@@ -1354,7 +1354,7 @@ Gdip_DrawImage(pGraphics, pBitmap, dx:="", dy:="", dw:="", dh:="", sx:="", sy:="
 {
 	Ptr := A_PtrSize ? "UPtr" : "UInt"
 	ImageAttr := 0
-	if !IsNumber(Matrix)
+	if !Gdip_IsNumber(Matrix)
 		ImageAttr := Gdip_SetImageAttributesColorMatrix(Matrix)
 	else if (Matrix != 1)
 		ImageAttr := Gdip_SetImageAttributesColorMatrix("1|0|0|0|0|0|1|0|0|0|0|0|1|0|0|0|0|0|" Matrix "|0|0|0|0|0|1")
@@ -2346,7 +2346,7 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 	RegExMatch(Options, pattern_opts "R(\d)", &Rendering)
 	RegExMatch(Options, pattern_opts "S(\d+)(p*)", &Size)
 
-	if Colour && IsInteger(Colour[2]) && !Gdip_DeleteBrush(Gdip_CloneBrush(Colour[2]))
+	if Colour && Gdip_IsInteger(Colour[2]) && !Gdip_DeleteBrush(Gdip_CloneBrush(Colour[2]))
 		PassBrush := 1, pBrush := Colour[2]
 
 	if !(IWidth && IHeight) && ((xpos && xpos[2]) || (ypos && ypos[2]) || (Width && Width[2]) || (Height && Height[2]) || (Size && Size[2]))
@@ -2936,7 +2936,7 @@ Gdip_BFromARGB(ARGB)
 StrGetB(Address, Length:=-1, Encoding:=0)
 {
 	; Flexible parameter handling:
-	if !IsInteger(Length)
+	if !Gdip_IsInteger(Length)
 		Encoding := Length,  Length := -1
 
 	; Check for obvious errors.
@@ -2967,7 +2967,7 @@ StrGetB(Address, Length:=-1, Encoding:=0)
 		strBuf := Buffer(char_count)
 		DllCall("WideCharToMultiByte", "uint", 0, "uint", 0x400, "uint", Address, "int", Length, "str", strBuf, "int", char_count, "uint", 0, "uint", 0)
 	}
-	else if IsInteger(Encoding)
+	else if Gdip_IsInteger(Encoding)
 	{
 		; Convert from target encoding to UTF-16 then to the active code page.
 		char_count := DllCall("MultiByteToWideChar", "uint", Encoding, "uint", 0, "uint", Address, "int", Length, "uint", 0, "int", 0)
@@ -2983,15 +2983,18 @@ StrGetB(Address, Length:=-1, Encoding:=0)
 ;#####################################################################################
 ; in AHK v1: uses normal 'if var is' command
 ; in AHK v2: all if's are expression-if, so the Integer variable is dereferenced to the string
+; 注意：刻意用 Gdip_ 前缀，避免与 AHK 内置 IsInteger/IsNumber 同名——
+;       库内曾直接定义同名函数，静默覆盖内置版本（只认数字类型、不认 "09" 之类数字字符串），
+;       导致全脚本用 IsNumber 判断文本恒为假；判断「文本是不是数字」请用项目内的 IsIntText()。
 ;#####################################################################################
-IsInteger(Var) {
+Gdip_IsInteger(Var) {
 	;Static Integer := "Integer"
 	If Var Is Integer
 		Return True
 	Return False
 }
 
-IsNumber(Var) {
+Gdip_IsNumber(Var) {
 	;Static number := "number"
 	If Var Is number
 		Return True
