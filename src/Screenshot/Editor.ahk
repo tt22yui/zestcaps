@@ -1017,7 +1017,9 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
     ; 防御性重置（正常流程中清理函数已清空，这里兜底防重复调用时累积）
     EditorToolButtons := Map()
     ; 深色主题面板，微软雅黑字体（按钮统一 24 高：文字按钮/色块/分隔线对齐）
-    EditorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
+    ; +E0x08000000(WS_EX_NOACTIVATE)：工具栏不抢焦点/不激活，点击无需「先激活再点击」，
+    ; 首次点击即触发按钮（否则从其它前台应用切来时首击会被激活吞掉，表现为「点了没反应」）
+    EditorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow +E0x08000000")
     EditorToolbar.BackColor := EDIT_TB_BG
     EditorToolbar.SetFont("s11", "Microsoft YaHei")
     tb := EditorToolbar
@@ -1078,7 +1080,7 @@ ScreenToolbarCreateRow2() {
     EditorColorSwatches := []
     EditorSwatchFrames := []
     EditorPenWidthFrames := []
-    EditorColorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow")
+    EditorColorToolbar := Gui("-Caption +AlwaysOnTop -DPIScale ToolWindow +E0x08000000")
     EditorColorToolbar.MarginX := ToolbarDpi(6)
     EditorColorToolbar.MarginY := ToolbarDpi(5)
     EditorColorToolbar.BackColor := EDIT_TB_BG

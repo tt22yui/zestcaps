@@ -10,7 +10,8 @@
 ;   1) 单窗口灰度蒙版（全屏挖洞）：非选区区域灰色半透明并拦截所有点击，选区透明露出下层内容
 ;   2) 蓝色边框 + 透明内部拦截层：悬停高亮窗口，拖动选择自定义矩形（选区可见下层内容且点击不穿透）
 ;   3) 拖出矩形后展示动作工具栏并进入微调阶段（选区保持未固定）：
-;      选区内部左键拖动整体平移、沿外侧边框/四角拖动改大小（钉屏合并手法，丝滑）；
+;      选区内部左键拖动整体平移、沿外侧边框/四角拖动改大小（钉屏合并手法，丝滑），
+;      悬停边/角/内部时切换对应的方向光标给出可拖动提示；
 ;      工具栏动作即确认：点击标注工具（矩形/箭头/椭圆/马赛克）→ 自动选中第 1 色（红色）
 ;      并无缝进入编辑窗（无需再点颜色，工具与颜色状态同步显示），立即可标注；
 ;      保存/钉屏/复制 → 直接输出到剪贴板/文件/置顶，取消由 Esc / 右键承担
@@ -347,7 +348,9 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
     borders := BorderStripsCreate()
 
     ; 选区透明拦截层（alpha 极小，几乎不可见，盖住选区防止点击穿透）
-    selGui := Gui("-Caption +ToolWindow +AlwaysOnTop -DPIScale")
+    ; +E0x08000000(WS_EX_NOACTIVATE)：点击不激活/不抬升 z-order，避免拖动选区后把自身顶到
+    ; 动作工具栏之上导致工具栏按钮被拦截点不动（蒙版同理，见 Overlay.ahk MaskOverlayCreate）
+    selGui := Gui("-Caption +ToolWindow +AlwaysOnTop -DPIScale +E0x08000000")
     selGui.BackColor := "Black"
     WinSetTransparent SEL_ALPHA, selGui
 
@@ -585,6 +588,7 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
     OnMessage(0x200, AdjustMouseMove)
     OnMessage(0x202, AdjustLButtonUp)
     OnMessage(0x203, AdjustLButtonDblClk)
+    OnMessage(0x20, AdjustSetCursor)  ; WM_SETCURSOR：悬停选区边角/内部时切换方向光标
     try {
         ; 等待工具栏动作或取消（动作由工具栏按钮回调写入全局 ScreenToolbarResult）
         while !state.canceled && ScreenToolbarResult = "" {
@@ -600,6 +604,7 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
         OnMessage(0x200, AdjustMouseMove, 0)
         OnMessage(0x202, AdjustLButtonUp, 0)
         OnMessage(0x203, AdjustLButtonDblClk, 0)
+        OnMessage(0x20, AdjustSetCursor, 0)
         SetTimer AdjustDragTick, 0
         ScreenshotAdjustCtx := 0
     }
@@ -635,6 +640,9 @@ AdjustLButtonDown(wParam, lParam, msg, hwnd) {
     ; 仅响应本流程的选区拦截层与蒙版窗口（蒙版/拦截层之外的点击如钉屏窗口不参与微调）
     if (hwnd != ctx.selGui.Hwnd && hwnd != ctx.mask.hwnd)
         return
+    ; 蒙版/拦截层被按下时会因激活被系统抬到工具栏之上（WS_EX_NOACTIVATE 亦不能完全避免），
+    ; 这里立即把工具栏重新抬回最前，保证随后的工具栏点击不被半透明蒙版拦截
+    _RaiseAdjustToolbar(ctx)
     MouseGetPos &mx, &my
     ctx.region.GetRegionRect(&l, &t, &w, &h)
     hit := _AdjustHitTest(mx, my, l, t, l + w, t + h)
@@ -666,6 +674,9 @@ AdjustMouseMove(wParam, lParam, msg, hwnd) {
         return
     MouseGetPos &mx, &my
     d := ctx.drag
+    ; 拖动中保持方向光标：改大小时选区边缘跟手，「move」命中判定会抢在 resize 之前，
+    ; 故按拖动模式/手柄显式设定，避免拖动途中光标在缩放与移动之间跳变
+    _ApplyAdjustCursor(ctx)
     if (d.mode = "move") {
         ; 整体平移：选区左上角跟随鼠标位移，尺寸不变
         d.targetL := d.l0 + mx - d.startMX
@@ -702,6 +713,9 @@ AdjustLButtonUp(wParam, lParam, msg, hwnd) {
     }
     ctx.drag := 0
     SetTimer AdjustDragTick, 0
+    ; 松开后按当前位置恢复光标（缩放方向光标 → 平移/箭头）
+    _ApplyAdjustCursor(ctx)
+    _RaiseAdjustToolbar(ctx)  ; 按下时蒙版被抬到工具栏之上的情况在此复位
 }
 
 ; 拖动合并定时器（10ms）：把高频鼠标消息的目标矩形聚合成稳定的窗口移动/缩放；无活动拖动时自停
@@ -730,9 +744,19 @@ _ApplyAdjustRect(ctx) {
     MaskOverlayHole(ctx.mask, l, t, w, h)
     ctx.region.SetRegionRect(l, t, w, h)
     ; 工具栏跟随选区（与选区微调同步定位）
-    if ctx.toolbar
+    if ctx.toolbar {
         SelToolbarsReposition(ctx.toolbar, ctx.region)
+        _RaiseAdjustToolbar(ctx)  ; 拖动中蒙版可能被抬到工具栏之上，逐帧复位
+    }
     d.appliedL := l, d.appliedT := t, d.appliedR := l + w, d.appliedB := t + h
+}
+
+; 把动作工具栏抬回最前（HWND_TOPMOST=-1；SWP_NOSIZE|NOMOVE|NOACTIVATE=0x13）
+; 背景：选区蒙版/拦截层每次被点击都会因激活被系统提到同类置顶层最前，盖住工具栏并拦截点击，
+;       仅靠 WS_EX_NOACTIVATE 不足以完全避免，故在选区交互（按下/拖动/松开）后显式复位
+_RaiseAdjustToolbar(ctx) {
+    if ctx && IsObject(ctx.toolbar)
+        DllCall("SetWindowPos", "Ptr", ctx.toolbar.Hwnd, "Ptr", -1, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)
 }
 
 ; 判定点击点相对选区矩形的命中区："move"（内部平移）| "resize:lt/rt/lb/rb/l/r/t/b"（外侧边框带改大小）| "confirm"（空白，忽略）
@@ -762,6 +786,53 @@ _AdjustHitTest(mx, my, l, t, r, b) {
         return "resize:b"
     }
     return "confirm"
+}
+
+; ------------------------------------------------------------------
+; 鼠标光标反馈：悬停选区边角/内部时切换方向光标（与 Pin.ahk 的缩放手柄提示一致）
+; 走 WM_SETCURSOR（0x20）而非在 WM_MOUSEMOVE 里 SetCursor：
+;   系统在鼠标移动/点击时主动询问窗口光标，鼠标静止时也能给出正确提示
+; ------------------------------------------------------------------
+
+; WM_SETCURSOR：仅响应本流程的选区拦截层与蒙版窗口，按当前命中区切换方向光标
+; 返回 true=已设置（阻止默认箭头覆盖）；非本流程窗口用裸 return（返回 ""）交回默认处理
+; 注意：AHK v2 中返回整数（含 false/0）会作为消息应答并终止后续处理，故此处不可写 return false，
+; 否则会话期间其他窗口（如动作工具栏）的 WM_SETCURSOR 会被吞掉、默认光标不生效
+AdjustSetCursor(wParam, lParam, msg, hwnd) {
+    global ScreenshotAdjustCtx
+    ctx := ScreenshotAdjustCtx
+    if !ctx || ctx.state.canceled || ctx.state.confirmed
+        return
+    if (hwnd != ctx.selGui.Hwnd && hwnd != ctx.mask.hwnd)
+        return
+    _ApplyAdjustCursor(ctx)
+    return true
+}
+
+; 设置当前应显示的光标：拖动中按拖动模式/手柄（选区边缘跟手，命中判定不可靠）；
+; 非拖动时按鼠标位置的命中区（边/角 → 对应方向缩放；内部 → 移动；空白 → 箭头）
+_ApplyAdjustCursor(ctx) {
+    if ctx.drag {
+        DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr"
+            , _AdjustCursorId(ctx.drag.mode = "move" ? "move" : "resize:" ctx.drag.handle)))
+        return
+    }
+    MouseGetPos &mx, &my
+    ctx.region.GetRegionRect(&l, &t, &w, &h)
+    hit := _AdjustHitTest(mx, my, l, t, l + w, t + h)
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", _AdjustCursorId(hit)))
+}
+
+; 命中区 → 系统光标资源 ID
+_AdjustCursorId(hit) {
+    switch hit {
+        case "move":                      return 32646  ; IDC_SIZEALL（整体平移）
+        case "resize:l", "resize:r":      return 32644  ; IDC_SIZEWE（左右改宽）
+        case "resize:t", "resize:b":      return 32645  ; IDC_SIZENS（上下改高）
+        case "resize:lt", "resize:rb":    return 32642  ; IDC_SIZENWSE（左上/右下）
+        case "resize:rt", "resize:lb":    return 32643  ; IDC_SIZENESW（右上/左下）
+        default:                          return 32512  ; IDC_ARROW（空白）
+    }
 }
 
 ; 判定是否为「双击」：与上次按下间隔不超过系统双击时间（GetDoubleClickTime）且位移不超过

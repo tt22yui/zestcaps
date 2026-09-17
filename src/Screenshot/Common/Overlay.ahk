@@ -54,7 +54,9 @@ MoveWindowFast(hwnd, x, y, w, h) {
 MaskOverlayCreate() {
     global MASK_COLOR, MASK_TRANSPARENCY
     GetAllMonitorsBounds(&mx, &my, &mw, &mh)
-    g := Gui("-Caption +ToolWindow +AlwaysOnTop -DPIScale")
+    ; +E0x08000000(WS_EX_NOACTIVATE)：点击蒙版不激活/不抬升 z-order，否则拖动选区边缘改大小时
+    ; 蒙版会被顶到动作工具栏之上，工具栏按钮被蒙版拦截而「点不动」（与 Indicator.ahk 同款处理）
+    g := Gui("-Caption +ToolWindow +AlwaysOnTop -DPIScale +E0x08000000")
     g.BackColor := MASK_COLOR
     WinSetTransparent MASK_TRANSPARENCY, g
     return { gui: g, hwnd: g.Hwnd, shown: false, last: {x: -1, y: -1, w: -1, h: -1}, mx: mx, my: my, mw: mw, mh: mh }
