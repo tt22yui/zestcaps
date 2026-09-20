@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 工程
+
+- **重构：拆分超大文件 `Screenshot\Editor.ahk`**（1666 → 237 行）。按职责把函数机械搬运到
+  `Screenshot\Editor\` 子目录（`Render` / `Input` / `Text` / `Toolbar` / `Output` / `Lifecycle`），
+  `Editor.ahk` 仅保留全局状态、`EditorAnnotation` 类与 `ShowEditor` 入口。纯搬运、零逻辑变更，
+  公开函数名与行为不变；`/validate`、Yunit 与 GUI 集成测试全部通过。
+
 ## [0.3.9] - 2026-09-20
 
 ### 新增

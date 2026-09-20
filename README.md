@@ -120,7 +120,14 @@ src\
 │   └── Updater.ahk     GitHub 自动更新（仅编译版：检查/下载/SHA256 校验/自替换）
 ├── Screenshot\
 │   ├── Screenshot.ahk  区域截图主流程（选区 overlay/截图/标注编辑窗）
-│   ├── Editor.ahk      标注编辑窗（绘制工具/清除/钉屏/复制/保存）
+│   ├── Editor.ahk      标注编辑窗入口（全局状态 + ShowEditor，含下列子模块）
+│   ├── Editor\         标注编辑子模块（机械拆分，仅搬运）
+│   │   ├── Render.ahk      分层渲染与标注绘制（矩形/箭头/椭圆/文本/马赛克/画笔）
+│   │   ├── Input.ahk       鼠标交互、拖动、圆环光标
+│   │   ├── Text.ahk        文本标注输入覆盖窗
+│   │   ├── Toolbar.ahk     编辑/选区共用工具栏（构建/悬停/定位/动作分发）
+│   │   ├── Output.ahk      复制/保存/钉屏与弹窗时覆盖层隐藏
+│   │   └── Lifecycle.ahk   会话清理、钉屏就地转移、尺寸变化同步
 │   ├── Pin.ahk         截图钉屏（置顶/拖动/右键关闭）
 │   ├── Scroll\
 │   │   └── ScrollCapture.ahk  滚动截图（手动滚动 + 自动抓帧重叠拼接成长图）
