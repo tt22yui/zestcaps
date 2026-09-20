@@ -24,6 +24,8 @@ tests := [
     "Screenshot\test_toolbar_dpi.ahk",
     "Screenshot\test_toolbar_promote.ahk",
     "Screenshot\test_toolbar_hover.ahk",
+    "Screenshot\test_scroll_toolbar.ahk",
+    "Screenshot\test_scroll_flow.ahk",
     "Screenshot\test_dblclick_copy.ahk",
     ; 选区 → 编辑 → 钉屏 全流程
     "Screenshot\test_selection_cancel.ahk",

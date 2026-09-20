@@ -29,6 +29,9 @@ global EditorColorIdx := 1      ; 当前颜色索引（EDIT_COLORS；所有工�
 global EditorPenWidthIdx := 2   ; 当前线宽档位索引（EDIT_LINE_WIDTHS，默认中档；不持久化）
 global EditorToolbar := 0       ; 工具栏（第一行：工具/清除/输出按钮）Gui 对象（挂 HoverState 属性：扁平按钮悬停状态）
 global EditorToolbarW := 0, EditorToolbarH := 0  ; 工具栏尺寸缓存（创建时获取一次，拖动定位时复用，避免每帧 WinGetPos）
+global EditorScrollButton := 0  ; 选区工具栏「滚动截图」按钮控件（仅选区阶段存在；进入编辑阶段隐藏并收缩工具栏）
+global EditorScrollExtraW := 0  ; 「滚动截图」按钮占用的额外宽度（按钮宽 + 前导间距，隐藏时据此收缩工具栏）
+global EditorScrollAfterCtrls := []  ; 「滚动截图」按钮之后的控件（保存/钉屏/复制）：隐藏按钮时整体左移填补空位
 global EditorColorToolbar := 0  ; 颜色工具栏（第二行：颜色行 + 粗细档位，始终显示，与选区颜色行同结构）
 global EditorColorToolbarW := 0, EditorColorToolbarH := 0  ; 颜色工具栏尺寸缓存
 global ToolbarPhase := ""       ; 工具栏当前阶段（"selection" 选区 / "editor" 编辑），决定按钮点击行为
@@ -1010,6 +1013,7 @@ EditorCreateToolbar() {
 ScreenToolbarCreateRow1(dpiFrom := 0) {
     global EditorToolbar, EditorToolbarW, EditorToolbarH
     global EditorToolButtons
+    global EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
     global ToolbarHoverActive
     global EDIT_TB_BG, EDIT_TB_SEP
     if EditorToolbar
@@ -1051,9 +1055,20 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
     ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右），点击行为由 ToolbarPhase 分流
     ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制），
     ToolbarSeparator(tb)
-    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("save"), "保存")
-    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("pin"), "钉屏")  ; 实心图钉 PinnedFill
-    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("copy"), "复制")
+    ; 滚动截图入口：仅选区阶段（dpiFrom=0）显示，位于输出组最前（保存左侧）；
+    ; 进入编辑阶段由 EditorHideScrollButton 隐藏，并把其后的输出按钮整体左移、收缩工具栏
+    if (dpiFrom = 0) {
+        EditorScrollButton := tb.HoverState.AddIcon(tb, Chr(0xEC8F), "Segoe MDL2 Assets", ToolbarScrollClick, "滚动截图")  ; ScrollUpDown
+        EditorScrollExtraW := ToolbarDpi(30) + ToolbarDpi(6)
+    } else {
+        EditorScrollButton := 0
+        EditorScrollExtraW := 0
+    }
+    saveBtn := tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("save"), "保存")
+    pinBtn := tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("pin"), "钉屏")  ; 实心图钉 PinnedFill
+    copyBtn := tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("copy"), "复制")
+    ; 记录滚动按钮之后的控件（隐藏滚动按钮时需整体左移填补空位；无滚动按钮时为空）
+    EditorScrollAfterCtrls := (dpiFrom = 0) ? [saveBtn, pinBtn, copyBtn] : []
 
     ; 先 AutoSize 拿实际尺寸（缓存，拖动定位时复用，避免每帧 WinGetPos），
     ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用）。
@@ -1203,6 +1218,7 @@ _ToolbarTransitionTick(anim) {
 EditorPromoteSelectionToolbar() {
     global EditorHwnd, ToolbarPhase
     SetToolbarDpiScale(EditorHwnd)  ; row2 与编辑窗同屏，复用其 DPI
+    EditorHideScrollButton()        ; 编辑阶段去除「滚动截图」入口（最右按钮，隐藏后收缩工具栏即可）
     ScreenToolbarCreateRow2()
     ToolbarPhase := "editor"
     ShowToolbarRowsAnimated()
@@ -1249,6 +1265,46 @@ ToolbarOutputClick(action, *) {
         case "pin": EditorPin()
         case "copy": EditorCopy()
     }
+}
+
+; 滚动截图按钮：仅选区阶段存在，点击即写结果通道，由选区调度进入滚动截图流程
+ToolbarScrollClick(*) {
+    global ScreenToolbarResult
+    ScreenToolbarResult := "scroll"
+}
+
+; ------------------------------------------------------------------
+; 隐藏「滚动截图」按钮并收缩工具栏（进入编辑阶段时调用）
+; 按钮位于输出组最前（保存左侧）：隐藏后需把其后的输出按钮整体左移填补空位，
+; 并按额外宽度手动收缩窗口（AutoSize 不会因控件隐藏而收缩，实测）。
+; ------------------------------------------------------------------
+EditorHideScrollButton() {
+    global EditorToolbar, EditorToolbarW, EditorToolbarH
+    global EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
+    if !EditorScrollButton || !EditorToolbar
+        return
+    delta := EditorScrollExtraW
+    try EditorScrollButton.Visible := false
+    ; 后续控件整体左移，填补按钮空位（保持输出组相对顺序与间距）
+    if (delta > 0) {
+        for c in EditorScrollAfterCtrls {
+            try {
+                c.GetPos(&cx, &cy)
+                c.Move(cx - delta, cy)
+            }
+        }
+    }
+    if (delta > 0)
+        EditorToolbarW := EditorToolbarW - delta
+    if (EditorToolbarW < 1)
+        EditorToolbarW := 1
+    try EditorToolbar.GetPos(&px, &py)
+    try EditorToolbar.Move(px, py, EditorToolbarW, EditorToolbarH)
+    if IsObject(EditorToolbar.HoverState)
+        EditorToolbar.HoverState.CacheRects()
+    EditorScrollButton := 0
+    EditorScrollExtraW := 0
+    EditorScrollAfterCtrls := []
 }
 
 ; ------------------------------------------------------------------

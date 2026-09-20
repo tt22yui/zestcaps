@@ -21,6 +21,7 @@
 #Include "Common\Overlay.ahk"    ; 覆盖层共享组件（全屏挖洞蒙版 + 4 条边框），选区/编辑器/钉屏三阶段复用
 #Include "Common\ToolbarUI.ahk"  ; 工具栏通用组件（色块/扁平按钮/悬停），Editor 与选区工具栏共用
 #Include "Editor.ahk"
+#Include "Scroll\ScrollCapture.ahk"  ; 滚动截图（手动滚动 + 自动抓帧拼接），依赖 Editor/Pin 的 Esc 分发
 
 ; ------------------------------------------------------------------
 ; 截图参数（文件名/颜色/透明度/阈值）统一在 Config.ahk 中定义
@@ -497,7 +498,7 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
 ; keepToolbar=true：选区工具栏交给编辑器接管（跨阶段持久，不销毁、不清 ToolbarHoverActive）
 _DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
     global ScreenshotMaskHwnds, ScreenshotSelHwnd, ScreenshotBorderHwnds, ScreenshotEscCancel
-    global ToolbarHoverActive, EditorToolbar
+    global ToolbarHoverActive, EditorToolbar, EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
     try Hotkey "*RButton", "Off"
     if ScreenshotEscCancel {
         ScreenshotEscCancel := 0
@@ -515,6 +516,9 @@ _DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
         try toolbar.Destroy()
         if toolbar = EditorToolbar
             EditorToolbar := 0  ; 选区路径销毁 row1 时同步清全局，防残留非零引用误判下一会话 promote
+        EditorScrollButton := 0  ; 滚动截图按钮随 row1 一起销毁，清引用防悬空
+        EditorScrollExtraW := 0
+        EditorScrollAfterCtrls := []
     }
     ScreenshotMaskHwnds := []
     ScreenshotSelHwnd := 0
@@ -938,8 +942,9 @@ SelectRegionToCapture() {
         ; 边框位于选区外侧（BorderStripsMove），不进入抓屏区域，保持显示直至后续动作
         ; 就绪（由 FinishSelectionOverlays 统一处理），避免释放瞬间边框消失造成闪烁
         ; save 动作例外：位图已在 SelectRegion 内定格（ConfirmSelectionSave 先抓图再弹框），跳过公共抓图
+        ; scroll 动作例外：滚动截图自行管理抓帧与覆盖层，进入独立流程（见下方 case "scroll"）
         pBitmap := 0
-        if action != "save" {
+        if (action != "save" && action != "scroll") {
             if ScreenshotSelOverlays {
                 ScreenshotSelOverlays.selGui.Hide()
             }
@@ -984,6 +989,31 @@ SelectRegionToCapture() {
                 PinCreateAsync(pBitmap, px, py, "topleft", ScreenshotSelOverlays ? ScreenshotSelOverlays.borders : 0)
                 FinishSelectionOverlays(false, true)
                 DebugLog("Screenshot: 已钉屏")
+            case "scroll":
+                ; 滚动截图：拆掉选区内透明拦截层与动作工具栏（用户需透过区域操作目标窗口滚动），
+                ; 保留蒙版/边框作区域指示；RunScrollCapture 阻塞直到用户 Esc/右键结束并返回长图；
+                ; 完成后销毁覆盖层，交给标注编辑窗（独立路径：覆盖层新建，不走继承）
+                ovs := ScreenshotSelOverlays
+                ScreenshotSelOverlays := 0
+                scrollBmp := 0
+                try {
+                    _DestroyOverlays(0, 0, ovs.selGui, ovs.toolbar, false)
+                    scrollBmp := RunScrollCapture(region)
+                } finally {
+                    MaskOverlayDestroy(ovs.mask)
+                    BorderStripsDestroy(ovs.borders)
+                }
+                if !scrollBmp {
+                    DebugLog("Screenshot: 滚动截图取消/失败")
+                    return
+                }
+                try {
+                    result := ShowEditor(scrollBmp, region, 0, "", 0, 0)
+                } catch as e {
+                    Gdip_DisposeImage(scrollBmp)
+                    throw
+                }
+                DebugLog("Screenshot: 滚动截图编辑结束 -> " result)
             default:  ; "editor"：打开标注编辑窗（接管 pBitmap 生命周期，编辑结束时自动释放）
                 ; initialTool/initialColor：点击标注工具时自动选中的预选工具与第 1 色（红色），
                 ; 编辑器打开时同步该状态，立即可标注；点击窗口路径（未选工具）为空/0 → 编辑器无工具进入，

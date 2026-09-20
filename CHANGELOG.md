@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **滚动截图（长截图）**：F1 选区后，动作工具栏新增「滚动截图」按钮（`↕`，位于输出组末尾）。
+  点击后进入手动滚动模式：用户自行向下滚动目标内容，工具轮询选区画面，检测到变化并稳定后自动抓帧，
+  按「垂直重叠匹配」逐帧拼接到长图；完成后打开标注编辑窗，可继续标注/复制/保存/钉屏。
+  提示条实时显示已捕获帧数与当前高度，`Esc` 或右键结束。算法为 ShareX 思路重写（逐行 `memcmp`
+  重叠匹配 + 自动剔除固定底栏 + 左右边距忽略），非拷贝其 GPL 代码。
+  参数见 `src\Config\Config.ahk` 的 `SCROLL_*`；实现见 `src\Screenshot\Scroll\ScrollCapture.ahk`。
+
+### 工程
+
+- 新增 Yunit 单测 `test/Screenshot/test_unit_scroll.ahk`（合成位图验证首帧克隆、纯位移拼接、
+  连续多帧、固定底栏剔除、画面一致性判定）；新增 GUI 集成测试
+  `test/Screenshot/test_scroll_toolbar.ahk`（选区工具栏按钮接入/编辑阶段移除）与
+  `test/Screenshot/test_scroll_flow.ahk`（真实抓屏 + 轮询 + Esc 收尾 + 资源清理）。
+
 ## [0.3.8] - 2026-09-17
 
 选区微调阶段的光标反馈，以及「调整选区后工具栏点不动」的根因修复。
