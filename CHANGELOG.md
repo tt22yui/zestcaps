@@ -10,6 +10,9 @@
   `Screenshot\Editor\` 子目录（`Render` / `Input` / `Text` / `Toolbar` / `Output` / `Lifecycle`），
   `Editor.ahk` 仅保留全局状态、`EditorAnnotation` 类与 `ShowEditor` 入口。纯搬运、零逻辑变更，
   公开函数名与行为不变；`/validate`、Yunit 与 GUI 集成测试全部通过。
+- **重构：拆分超大文件 `Screenshot\Screenshot.ahk`**（1037 → 348 行）。选区相关函数搬运到
+  `Screenshot\Selection\`（`Select` / `WindowFind`），`Screenshot.ahk` 保留 include、全局、`RegionSetting`
+  类、保存对话框、`CaptureRegion` 与 `SelectRegionToCapture` 入口。同样纯搬运、零逻辑变更，测试全绿。
 
 ## [0.3.9] - 2026-09-20
 

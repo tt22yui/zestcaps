@@ -128,6 +128,9 @@ src\
 │   │   ├── Toolbar.ahk     编辑/选区共用工具栏（构建/悬停/定位/动作分发）
 │   │   ├── Output.ahk      复制/保存/钉屏与弹窗时覆盖层隐藏
 │   │   └── Lifecycle.ahk   会话清理、钉屏就地转移、尺寸变化同步
+│   ├── Selection\      选区子模块（机械拆分，仅搬运）
+│   │   ├── Select.ahk      选区主流程（overlay/悬停/拖动/微调/动作工具栏）
+│   │   └── WindowFind.ahk  鼠标下真实窗口查找（跳过覆盖层）
 │   ├── Pin.ahk         截图钉屏（置顶/拖动/右键关闭）
 │   ├── Scroll\
 │   │   └── ScrollCapture.ahk  滚动截图（手动滚动 + 自动抓帧重叠拼接成长图）
