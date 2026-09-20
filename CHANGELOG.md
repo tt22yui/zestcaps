@@ -13,6 +13,9 @@
 - **重构：拆分超大文件 `Screenshot\Screenshot.ahk`**（1037 → 348 行）。选区相关函数搬运到
   `Screenshot\Selection\`（`Select` / `WindowFind`），`Screenshot.ahk` 保留 include、全局、`RegionSetting`
   类、保存对话框、`CaptureRegion` 与 `SelectRegionToCapture` 入口。同样纯搬运、零逻辑变更，测试全绿。
+- **重构：`SelectRegion` 巨型函数拆分**（约 175 → 45 行）。按阶段抽出 `_SelectionCreate` /
+  `_SelectionWaitPress` / `_SelectionWaitDrag` / `_SelectionAdjustLoop` / `_SelectionConfirm`，
+  主函数改为顺序编排。行为与热键/定时器时序保持不变；`/validate`、Yunit 与 GUI 集成测试全部通过。
 
 ## [0.3.9] - 2026-09-20
 

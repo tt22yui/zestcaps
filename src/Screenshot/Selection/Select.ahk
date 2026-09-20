@@ -24,10 +24,8 @@ _MoveSelectLayers(borders, selGui, region, selLast) {
 ;               非工具动作或快速截图路径返回 0（编辑器用默认第 1 色）
 ; ------------------------------------------------------------------
 SelectRegion(region, &initialTool := "", &initialColor := 0) {
-    global SMALL_DELTA, DRAG_THRESHOLD, SEL_ALPHA, SCREENSHOT_TIMEOUT_MS
-    global ScreenshotSelOverlays, ScreenshotEscCancel  ; Esc 取消回调与遗留覆盖层记录（跨线程：EditorEscDispatch 按全局分发）
-    global ScreenshotMaskHwnds, ScreenshotBorderHwnds, ScreenshotSelHwnd  ; 覆盖层窗口 hwnd（悬停检测跳过列表）
-    global ScreenshotSaveFilename  ; 选区保存确认路径（微调循环内确认后交 SelectRegionToCapture 落盘）
+    global SCREENSHOT_TIMEOUT_MS
+    global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
 
     CoordMode "Mouse", "Screen"
 
@@ -36,7 +34,6 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
 
     ; 重置工具栏单一真源与结果通道：防止上一会话的工具栏选中态/阶段残留误判
     ; （EditorTool 一空 → 编辑无预选工具进入，与「仅点窗口」快速截图行为一致）
-    global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
     EditorTool := ""
     EditorColorIdx := 1
     ToolbarPhase := "selection"
@@ -46,12 +43,47 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
     state := { canceled: false, confirmed: false, isDragging: false, dragStartX: 0, dragStartY: 0, hoverX: 0, hoverY: 0
         , region: region }
 
-    ; 覆盖层（Common\Overlay.ahk 共享组件，编辑器/钉屏接管复用）：
-    ;   全屏灰度蒙版（单窗口挖洞：选区处透明露出下层，其余区域灰色半透明并拦截点击）
-    ;   + 4 条天蓝边框窗口（统一为编辑窗边框样式）
-    ; 原因：单窗口 SetWindowRgn 挖洞仅 0.63ms/次，无 4 块窗口的尺寸变化重绘（4.6ms/次）与接缝线；
-    ;       蒙版首次 Show 即为挖出选区洞的最终形态（先检测悬停窗口再显示），
-    ;       避免「全屏变灰 → 切洞」的中间帧导致按 F1 瞬间屏幕闪烁
+    ovl := _SelectionCreate(region, state)
+    toolbar := 0
+    try {
+        if !_SelectionWaitPress(state, region, ovl, deadline)
+            return "cancel"
+        if !_SelectionWaitDrag(state, region, ovl, deadline)
+            return "cancel"
+
+        ; 拖出矩形后展示动作工具栏并进入微调；仅点击窗口（未拖出矩形）时保持原快速截图行为（直接进编辑窗）
+        action := "editor"
+        if state.isDragging {
+            toolbar := SelToolbarCreate(state, region)
+            _ResetSelectionDoubleClick()  ; 进入微调前复位双击判定，避免上一会话的按下被算作本次双击
+            action := _SelectionAdjustLoop(state, region, ovl, deadline, toolbar)
+            if action = "cancel"
+                return "cancel"
+        }
+
+        ; 选区已确认：蒙版/边框保留不销毁，由后续流程接管（编辑器就地升级 / 钉屏）
+        _SelectionConfirm(state, ovl, toolbar)
+        initialTool := EditorTool      ; 点击标注工具时的预选工具（编辑器初始工具，单一真源）
+        initialColor := EditorColorIdx ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
+        return action
+    } finally {
+        ; 取消/异常路径立即清理覆盖层；成功路径保留（延迟清理），避免整屏明暗跳变
+        if !state.confirmed
+            _DestroyOverlays(ovl.mask, ovl.borders, ovl.selGui, toolbar)
+    }
+}
+
+; ------------------------------------------------------------------
+; 选区流程子步骤（由 SelectRegion 按阶段拆分，行为不变）
+; ------------------------------------------------------------------
+
+; 创建选区覆盖层（蒙版 + 4 边框 + 拦截层）与取消热键，并登记 HWND 跳过表
+; 返回覆盖层对象 {mask, borders, selGui, selLast}
+_SelectionCreate(region, state) {
+    global SEL_ALPHA
+    global ScreenshotMaskHwnds, ScreenshotBorderHwnds, ScreenshotSelHwnd, ScreenshotEscCancel
+
+    ; 覆盖层（Common\Overlay.ahk 共享组件）：全屏灰度蒙版（单窗口挖洞）+ 4 条天蓝边框窗口
     maskOv := MaskOverlayCreate()
     borders := BorderStripsCreate()
 
@@ -87,117 +119,105 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
     ScreenshotEscCancel := () => (state.canceled := true)
     EscRegister()
 
-    ; 悬停/拖动定时器句柄与选区动作工具栏（finally 中用于异常兜底关闭）
-    hoverFunc := 0
-    dragFunc := 0
-    toolbar := 0
+    return {mask: maskOv, borders: borders, selGui: selGui, selLast: selLast}
+}
 
+; 等待左键按下（进入拖动阶段）：返回 true=已按下，false=取消/超时
+_SelectionWaitPress(state, region, ovl, deadline) {
+    hoverFunc := 0
     try {
         ; 悬停更新：鼠标移动超过阈值时重新检测窗口（10ms 高频刷新，蒙版跟随更平滑减少跳帧闪烁）
-        hoverFunc := () => _HoverUpdate(state, region, borders, selGui, maskOv, selLast)
+        hoverFunc := () => _HoverUpdate(state, region, ovl.borders, ovl.selGui, ovl.mask, ovl.selLast)
         SetTimer hoverFunc, 10
-
-        ; 等待左键按下（进入拖动阶段）
         while !state.canceled {
             if GetKeyState("LButton") {
                 MouseGetPos &tx, &ty
                 state.dragStartX := tx
                 state.dragStartY := ty
                 state.isDragging := false
-                break
+                return true
             }
             if A_TickCount > deadline {
                 state.canceled := true  ; 超时未操作，自动取消
-                break
+                return false
             }
             Sleep 10
         }
-        SetTimer hoverFunc, 0
-        hoverFunc := 0
+        return false
+    } finally {
+        if hoverFunc
+            SetTimer hoverFunc, 0
+    }
+}
 
-        if state.canceled
-            return "cancel"
-
+; 等待左键松开并落定最终选区：返回 true=正常松开，false=取消/超时
+_SelectionWaitDrag(state, region, ovl, deadline) {
+    dragFunc := 0
+    try {
         ; 拖动更新：超过阈值即实时绘制矩形（10ms 高频刷新，蒙版/边框跟随更平滑）
-        dragFunc := () => _DragUpdate(state, region, borders, selGui, maskOv, selLast)
+        dragFunc := () => _DragUpdate(state, region, ovl.borders, ovl.selGui, ovl.mask, ovl.selLast)
         SetTimer dragFunc, 10
-
         while !state.canceled {
             if !GetKeyState("LButton") {
                 if state.isDragging {
                     MouseGetPos &tx, &ty
                     region.SetRegionByPos(tx, ty, state.dragStartX, state.dragStartY)
-                    _MoveSelectLayers(borders, selGui, region, selLast)
+                    _MoveSelectLayers(ovl.borders, ovl.selGui, region, ovl.selLast)
                     region.GetRegionRect(&rx, &ry, &rw, &rh)
-                    MaskOverlayHole(maskOv, rx, ry, rw, rh)
+                    MaskOverlayHole(ovl.mask, rx, ry, rw, rh)
                 }
-                break
+                return !state.canceled
             }
             if A_TickCount > deadline {
                 state.canceled := true  ; 超时未完成，自动取消
-                break
+                return false
             }
             Sleep 10
         }
-        SetTimer dragFunc, 0
-        dragFunc := 0
+        return false
+    } finally {
+        if dragFunc
+            SetTimer dragFunc, 0
+    }
+}
 
-        if state.canceled
+; 选区微调循环：处理工具栏动作与「保存」子流程（取消保存则回到微调）
+; 返回工具栏动作 "editor"|"copy"|"save"|"pin" 或 "cancel"
+_SelectionAdjustLoop(state, region, ovl, deadline, toolbar) {
+    global SCREENSHOT_TIMEOUT_MS, ScreenshotEscCancel, ScreenshotSaveFilename, ScreenToolbarResult
+    while true {
+        action := SelectRegionAdjust(state, region, ovl.borders, ovl.selGui, ovl.mask, deadline, toolbar)
+        if action = "cancel"
             return "cancel"
-
-        ; 拖出矩形后：展示动作工具栏并进入微调阶段（选区保持未固定，可拖动平移/改大小）；
-        ; 工具栏动作即确认：点击标注工具 → 自动选中第 1 色（红色）并直接进入编辑窗（无需再点颜色）；
-        ; 保存/钉屏/复制 直接输出。仅点击窗口（未拖出矩形）时跳过，保持原快速截图行为（直接进编辑窗）
-        ; 保存动作特例：弹保存框确认，取消保存则恢复覆盖层回到选区微调（对齐"取消不结束截图"的交互）
-        action := "editor"
-        if state.isDragging {
-            toolbar := SelToolbarCreate(state, region)
-            _ResetSelectionDoubleClick()  ; 进入微调前复位双击判定，避免上一会话的按下被算作本次双击
-            while true {
-                action := SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar)
-                if action = "cancel"
-                    return "cancel"
-                if action != "save"
-                    break
-                ; 保存动作：临时禁用选区取消热键（避免保存框内操作误取消选区）
-                Hotkey "*RButton", "Off"
-                ScreenshotEscCancel := 0
-                EscUnregister()
-                ; 先定格当前选区画面、隐藏覆盖层（不销毁）弹系统保存框；
-                ; 取消保存恢复覆盖层返回 ""（已释放定格位图）
-                ScreenshotSaveFilename := ConfirmSelectionSave(region, maskOv, borders, selGui, toolbar)
-                ; 恢复选区取消热键（成功/取消统一恢复，外层确认路径再统一注销）
-                Hotkey "*RButton", (*) => (state.canceled := true), "On"
-                ScreenshotEscCancel := () => (state.canceled := true)
-                EscRegister()
-                if ScreenshotSaveFilename != ""
-                    break  ; 保存成功，返回 "save" 由外层落盘
-                ; 取消保存：重置动作与取消标志并顺延超时截止点，继续选区微调（可再调整/换动作/再保存）
-                ScreenToolbarResult := ""
-                state.canceled := false
-                deadline := A_TickCount + SCREENSHOT_TIMEOUT_MS
-            }
-        }
-
-        ; 选区已确认：蒙版/边框保留不销毁，由后续流程接管（编辑器就地升级 / 钉屏）；
-        ; 拦截层与工具栏按动作延迟清理，避免「蒙版销毁 → 新界面就绪」之间整屏全亮造成明暗跳变闪烁
+        if action != "save"
+            return action
+        ; 保存动作：临时禁用选区取消热键（避免保存框内操作误取消选区）
         Hotkey "*RButton", "Off"
         ScreenshotEscCancel := 0
         EscUnregister()
-        state.confirmed := true
-        ScreenshotSelOverlays := {mask: maskOv, borders: borders, selGui: selGui, toolbar: toolbar}
-        initialTool := EditorTool      ; 点击标注工具时的预选工具（编辑器初始工具，单一真源）
-        initialColor := EditorColorIdx ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
-        return action
-    } finally {
-        if hoverFunc
-            SetTimer hoverFunc, 0
-        if dragFunc
-            SetTimer dragFunc, 0
-        ; 取消/异常路径立即清理覆盖层；成功路径保留（延迟清理），避免整屏明暗跳变
-        if !state.confirmed
-            _DestroyOverlays(maskOv, borders, selGui, toolbar)
+        ; 先定格当前选区画面、隐藏覆盖层（不销毁）弹系统保存框；取消保存恢复覆盖层返回 ""
+        ScreenshotSaveFilename := ConfirmSelectionSave(region, ovl.mask, ovl.borders, ovl.selGui, toolbar)
+        ; 恢复选区取消热键（成功/取消统一恢复，外层确认路径再统一注销）
+        Hotkey "*RButton", (*) => (state.canceled := true), "On"
+        ScreenshotEscCancel := () => (state.canceled := true)
+        EscRegister()
+        if ScreenshotSaveFilename != ""
+            return "save"  ; 保存成功，由外层落盘
+        ; 取消保存：重置动作与取消标志并顺延超时截止点，继续选区微调（可再调整/换动作/再保存）
+        ScreenToolbarResult := ""
+        state.canceled := false
+        deadline := A_TickCount + SCREENSHOT_TIMEOUT_MS
     }
+}
+
+; 选区确认：注销取消热键、标记 confirmed，并把覆盖层交给后续流程（编辑器就地升级 / 钉屏）
+_SelectionConfirm(state, ovl, toolbar) {
+    global ScreenshotSelOverlays, ScreenshotEscCancel
+    Hotkey "*RButton", "Off"
+    ScreenshotEscCancel := 0
+    EscUnregister()
+    state.confirmed := true
+    ScreenshotSelOverlays := {mask: ovl.mask, borders: ovl.borders, selGui: ovl.selGui, toolbar: toolbar}
 }
 
 ; 底层销毁覆盖层资源（幂等，可安全重复调用）
