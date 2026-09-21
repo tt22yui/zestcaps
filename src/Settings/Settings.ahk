@@ -50,7 +50,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
     ; 包 try：保留天数与时刻来自可自由键入的控件，非数字时整数转换会抛异常；
     ; 不包的话异常会被全局兜底吞掉，用户点「保存并重启」将毫无反应也无提示
     try {
-        err := ValidateRecycleBin(editKeepDays.Value, ReadRBTime(editTimeHour, editTimeMin))
+        err := ValidateRecycleBin(editKeepDays.Text, ReadRBTime(editTimeHour, editTimeMin))
     } catch as e {
         err := "保留天数 / 执行时刻需填写有效数字（" e.Message "）"
     }
@@ -68,7 +68,7 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
         IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
         IniWrite (AutoUpdateOn ? 1 : 0), CONFIG_FILE, "Features", "AutoUpdateEnabled"
         ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
-        IniWrite Integer(editKeepDays.Value), CONFIG_FILE, "RecycleBin", "KeepDays"
+        IniWrite Integer(editKeepDays.Text), CONFIG_FILE, "RecycleBin", "KeepDays"
         IniWrite ReadRBTime(editTimeHour, editTimeMin), CONFIG_FILE, "RecycleBin", "Time"
         ; 快捷键配置写回（重启后由 Hotkeys.ahk 读取并动态注册）
         IniWrite editPasteKey.Value, CONFIG_FILE, "Hotkeys", "PastePlain"
@@ -184,14 +184,13 @@ OpenSettings() {
     settingsGui.Add("GroupBox", "x28 y40 w332 h150", "定时清空回收站")
     rbCheck := settingsGui.Add("CheckBox", "x44 y62 w306", "每天自动清空回收站（保留近 N 天）")
     rbCheck.Value := RecycleBinEnabled
-    ; 保留天数档位（下拉框选择），按配置当前值定位默认选中项（手动查找，兼容无 Array.IndexOf 的 AHK 版本）
+    ; 保留天数：可编辑下拉框（7/15/30 常用档位可点选，也允许直接键入任意 ≥1 的值）
+    ; 初值用 .Text 回显 config 当前值（含非档位值）——旧实现用 DropDownList 固定档位，
+    ; 当前值不在档位时默认落到第一档，保存时把用户的保留天数静默改掉
     RB_KEEP_OPTIONS := ["7", "15", "30"]
-    rbKeepIdx := 1
-    for i, opt in RB_KEEP_OPTIONS
-        if Format("{}", RBKeepDays) = opt
-            rbKeepIdx := i
     settingsGui.Add("Text", "x44 y94 w64 h20", "保留天数")
-    editKeepDays := settingsGui.Add("DropDownList", "x110 y90 w64 Choose" rbKeepIdx, RB_KEEP_OPTIONS)
+    editKeepDays := settingsGui.Add("ComboBox", "x110 y90 w64", RB_KEEP_OPTIONS)
+    editKeepDays.Text := Format("{}", RBKeepDays)
     settingsGui.Add("Text", "x44 y126 w64 h20", "执行时刻")
     ; 纯时间输入：时/分两个 Edit + UpDown 微调（Range 0-23 / 0-59），越界自动钳制；
     ; 用原生 AHK 控件，天然受 Tab3 页签与布局管理，无日历、无日期、不串位
