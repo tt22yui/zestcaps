@@ -80,6 +80,18 @@ CAPS_WATCHDOG_INTERVAL_MS   := 2000  ; 看门狗检测周期（毫秒）
 ; ==================================================================
 
 ; ==================================================================
+; 自动复位到英文参数（硬编码 + config.ini 可调）
+; 空闲超过阈值后自动关 CapsLock、把中文输入法切回英文；依赖输入状态指示器（其检测提供中/英状态）
+; ==================================================================
+AUTO_RESET_POLL_MS          := 1000  ; 空闲检测周期（毫秒）
+AUTO_RESET_DEFAULT_SECONDS  := 30    ; 空闲复位默认阈值（秒）
+AUTO_RESET_MIN_SECONDS      := 5     ; 空闲复位阈值下限（秒）
+AUTO_RESET_MAX_SECONDS      := 300   ; 空闲复位阈值上限（秒）
+; 阈值读自 config.ini 的 [AutoReset] IdleSeconds，夹取到 [MIN, MAX]（手改 ini 越界也不致异常）
+AutoResetIdleSeconds := Max(AUTO_RESET_MIN_SECONDS, Min(AUTO_RESET_MAX_SECONDS, IniReadInt(CONFIG_FILE, "AutoReset", "IdleSeconds", AUTO_RESET_DEFAULT_SECONDS)))
+; ==================================================================
+
+; ==================================================================
 ; 功能开关初始状态（从 config.ini 读取，设置窗口保存时自动写回）
 ; ==================================================================
 IndicatorEnabled        := IniReadText(CONFIG_FILE, "Indicator", "IndicatorEnabled", 1) = "1"            ; 鼠标输入状态指示器：1=开 0=关
@@ -90,6 +102,7 @@ DesktopShortcutEnabled  := IniReadText(CONFIG_FILE, "Features", "DesktopShortcut
 SplashEnabled           := IniReadText(CONFIG_FILE, "Features", "SplashEnabled", 1) = "1"                 ; 启动闪屏动画：1=开 0=关
 RecycleBinEnabled       := IniReadText(CONFIG_FILE, "Features", "RecycleBinEnabled", 0) = "1"             ; 定时清空回收站：1=开 0=关（默认关）
 AutoUpdateEnabled       := IniReadText(CONFIG_FILE, "Features", "AutoUpdateEnabled", 1) = "1"             ; 自动检查更新：1=开 0=关（默认开，仅编译版生效）
+AutoResetEnglishEnabled := IniReadText(CONFIG_FILE, "Features", "AutoResetEnglishEnabled", 0) = "1"          ; 空闲自动复位到英文：1=开 0=关（默认关，依赖输入状态指示器）
 ; ==================================================================
 ; 定时清空回收站参数（KeepDays/Time 由设置页保存到 config.ini 的 [RecycleBin] 段）
 ; ==================================================================

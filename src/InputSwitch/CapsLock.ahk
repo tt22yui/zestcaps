@@ -101,22 +101,7 @@ IME_Switch() {
     activeKey := GetActiveProcKey()
 
     ; CapsLock 关闭时短按：切换中英文输入法
-    ; 先确保 Ctrl 是释放状态，避免累积导致卡键
-    DebugLog("IME_Switch: 前置释放 Ctrl")
-    ; 发送期间用 Critical 禁止被其他热键/定时器打断，
-    ; 防止 ^{Space} 发送到一半被打断，留下没有对应 Ctrl up 的 Ctrl down（表现为 Ctrl 卡住）
-    Critical
-    try {
-        SendInput "{Ctrl up}"
-        DebugLog("IME_Switch: 发送 ^{Space}")
-        SendInput "^{Space}"
-        ; 发送后再次确保 Ctrl 已释放
-        Sleep 10
-        SendInput "{Ctrl up}"
-    } finally {
-        Critical "Off"
-    }
-    DebugLog("IME_Switch: 后置释放 Ctrl，完成")
+    _SendIMEConvertToggle()
     ; 记录本次切换：翻转该窗口自己的跟踪状态
     ; 关键：全新窗口(无历史记录)一律从 false(英文) 起算，绝不继承全局/上一窗口状态，
     ; 否则会把前面窗口的 中/英 带过来且在 TSF 窗口切反（Tauri 场景）。
@@ -126,6 +111,39 @@ IME_Switch() {
     IME_WindowStates[activeKey] := newState
     ; 非阻塞延迟刷新指示器，等待 IME 完成切换
     SetTimer ShowInputIndicator, -100
+}
+
+; 发送一次「输入法中/英转换」切换（Ctrl+Space），供短按切换与自动复位共用
+; 先确保 Ctrl 为释放态，发送期间用 Critical 禁止被其他热键/定时器打断，
+; 防止 ^{Space} 发到一半被打断而留下没有对应 Ctrl up 的 Ctrl down（表现为 Ctrl 卡住）
+_SendIMEConvertToggle() {
+    DebugLog("IME: 前置释放 Ctrl 并发送 ^{Space}")
+    Critical
+    try {
+        SendInput "{Ctrl up}"
+        SendInput "^{Space}"
+        ; 发送后再次确保 Ctrl 已释放
+        Sleep 10
+        SendInput "{Ctrl up}"
+    } finally {
+        Critical "Off"
+    }
+    DebugLog("IME: 后置释放 Ctrl，完成")
+}
+
+; 定向把当前窗口输入法复位为英文（自动复位功能用，见 InputSwitch\AutoResetEnglish.ahk）
+; 与 IME_Switch 的「无条件翻转」不同：仅当检测为中文时才发送一次切换，绝不把英文误切中文；
+; 复位成功返回 true。中文状态依赖 IME_isChinese（由指示器定时器实时维护）
+ResetIMEToEnglish() {
+    global IME_isChinese, IME_WindowStates
+    if !IME_isChinese
+        return false
+    activeKey := GetActiveProcKey()
+    _SendIMEConvertToggle()
+    IME_isChinese := false
+    IME_WindowStates[activeKey] := false
+    DebugLog("自动复位: 中文 -> 英文 (" activeKey ")")
+    return true
 }
 
 ; 强制释放全部修饰键并关闭 CapsLock（看门狗 / OnExit 共用）

@@ -68,6 +68,17 @@ class SettingsUnitTest {
         Yunit.Assert(ValidateRecycleBin("0", "09:00") != "", "保留天数至少为 1")
     }
 
+    test_自动复位秒数校验() {
+        Yunit.Assert(ValidateAutoResetSeconds("30") = "", "合法值应通过")
+        Yunit.Assert(ValidateAutoResetSeconds("5") = "", "下限边界应通过")
+        Yunit.Assert(ValidateAutoResetSeconds("300") = "", "上限边界应通过")
+        Yunit.Assert(ValidateAutoResetSeconds("3") != "", "低于下限应被拦")
+        Yunit.Assert(ValidateAutoResetSeconds("301") != "", "高于上限应被拦")
+        Yunit.Assert(ValidateAutoResetSeconds("abc") != "", "非数字应被拦")
+        Yunit.Assert(ValidateAutoResetSeconds("") != "", "空值应被拦")
+        Yunit.Assert(ValidateAutoResetSeconds("３０") = "", "全角数字应归一化后通过")
+    }
+
     test_整数配置读取() {
         ; 回归：IniReadInt 曾用 IsNumber 判断 ini 中的数字字符串 → 真实环境恒假 → 静默回退默认值
         f := A_Temp "\_tmp_unit_settings_ini.txt"

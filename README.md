@@ -62,7 +62,7 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 ### 8. 定时清空回收站
 
 - 按每天固定时刻，自动清空回收站中**删除时间超过保留天数**的项（「保留近期 N 天」策略）
-- 设置窗口可配置：开关、保留天数（7 / 15 / 30 天）、每日执行时刻（时/分微调，24 时制）
+- 设置窗口可配置：开关、保留天数（7 / 15 / 30 常用档位，可自定义任意 ≥1 的值）、每日执行时刻（时/分微调，24 时制）
 - 定时器为一次动态排程，仅在接近执行时刻前唤醒一次，空闲时零负载
 - 默认关闭
 
@@ -74,6 +74,12 @@ macOS 式 CapsLock 输入法切换增强工具：短按切中英、长按切大�
 - 下载/校验/替换的失败原因会直接显示在设置窗口（并写调试日志），不会「点完没反应」
 - 基于运行文件的真实路径自我替换，exe 改名也能正常更新
 - 仅编译为 exe 后生效；源码运行会提示不可用
+
+### 10. 空闲自动复位到英文
+
+- 开启后（需同时开启输入状态指示器），键盘空闲超过设定秒数（默认 30 秒，可调 5-300）自动**关闭 CapsLock 并切回英文**，避免中文/大写状态残留导致快捷键失效
+- 复位时闪一下输入状态指示器反馈；仅在「键盘」空闲时触发（鼠标移动不算输入），同一段空闲只复位一次
+- 默认关闭
 
 ## 输入法检测原理
 
@@ -106,7 +112,8 @@ src\
 │   ├── IME.ahk         输入法中/英文状态检测（WM_IME_CONTROL）
 │   └── Indicator.ahk   输入状态指示器（GUI、跟随鼠标、防闪烁缓存）
 ├── InputSwitch\
-│   └── CapsLock.ahk    CapsLock 键行为实现（短按/长按分发、修饰键释放）
+│   ├── CapsLock.ahk    CapsLock 键行为实现（短按/长按分发、修饰键释放）
+│   └── AutoResetEnglish.ahk  空闲自动复位到英文（依赖指示器）
 ├── Clipboard\
 │   ├── Clipboard.ahk   剪贴板模块入口（纯文本粘贴）
 │   └── PastePlain.ahk  纯文本粘贴（默认 Ctrl+Shift+V，可配置）
@@ -151,13 +158,15 @@ build.bat                编译脚本（输出 output\zestcaps_v<版本>.exe）
 - `config.ini`：功能开关与可配置快捷键
   - 功能开关初始状态，设置窗口保存时自动写回（注意分段：`IndicatorEnabled` 在 `[Indicator]` 段，其余开关在 `[Features]` 段，回收站参数在 `[RecycleBin]` 段）：
     - `[Indicator]` 段：`IndicatorEnabled`
-    - `[Features]` 段：`PastePlainEnabled`、`ScreenshotEnabled`、`SplashEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`、`RecycleBinEnabled`、`AutoUpdateEnabled`
+    - `[Features]` 段：`PastePlainEnabled`、`ScreenshotEnabled`、`SplashEnabled`、`StartupEnabled`、`DesktopShortcutEnabled`、`RecycleBinEnabled`、`AutoUpdateEnabled`、`AutoResetEnglishEnabled`
     - `[RecycleBin]` 段：`KeepDays`（保留天数）、`Time`（每日执行时刻 `HH:mm`）
+    - `[AutoReset]` 段：`IdleSeconds`（空闲复位秒数，5-300）
   - 可配置快捷键（`[Hotkeys]` 段：`PastePlain`、`Screenshot`），在设置窗口「快捷键」文本框直接填写 AHK 原生格式（如 `^v`、`F1`），保存后重启生效
 - `src\Config\Config.ahk`：其余参数硬编码
   - 菜单文字（`MENU_TITLE`、`MENU_SETTINGS`、`MENU_RESTART`、`MENU_EXIT`）
   - 指示器文字/颜色/尺寸/偏移/字体（`IND_*`）
   - CapsLock 短按/长按判定阈值（`CAPS_*`）
+  - 空闲自动复位到英文阈值（`AUTO_RESET_*`、`AutoResetIdleSeconds`）
   - 回收站保留天数/执行时刻（`RB_*`、`RecycleBinKeepDays`、`RecycleBinTime`）
   - 启动闪屏尺寸/时长/配色（`SPLASH_*`）
   - 截图/选区/标注编辑窗参数（`SCREENSHOT_FILENAME`、`SEL_*`、`EDIT_*`、`SCREENSHOT_TIMEOUT_MS` 等）

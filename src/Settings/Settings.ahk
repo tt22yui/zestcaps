@@ -38,7 +38,8 @@ ReadRBTime(hourEdit, minEdit) {
 ; 保存设置并重启脚本（「保存并重启」按钮回调）
 ; editPasteKey/editShotKey：两个快捷键文本框（AHK 原生格式，如 ^v / F1）
 ; rbOn / editKeepDays / editTimeHour / editTimeMin：回收站页开关、保留天数、每日清空时刻（时/分两个 UpDown 编辑框）
-SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, DesktopShortcutOn, AutoUpdateOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin) {
+; autoResetOn / editResetSecs：指示器页「空闲自动复位到英文」开关与空闲秒数
+SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, DesktopShortcutOn, AutoUpdateOn, editPasteKey, editShotKey, rbOn, editKeepDays, editTimeHour, editTimeMin, autoResetOn, editResetSecs) {
     global CONFIG_FILE
     ; 快捷键冲突校验（非法 / CapsLock / 两功能相同均在此拦截）
     err := ValidateHotkeyPair(editPasteKey.Value, editShotKey.Value, "纯文本粘贴", "区域截图")
@@ -46,11 +47,13 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
         MsgBox err, "设置", "IconX"
         return
     }
-    ; 回收站参数校验（清空时刻格式与范围 / 保留天数合法性）
+    ; 回收站参数校验（清空时刻格式与范围 / 保留天数合法性）+ 自动复位空闲秒数校验
     ; 包 try：保留天数与时刻来自可自由键入的控件，非数字时整数转换会抛异常；
     ; 不包的话异常会被全局兜底吞掉，用户点「保存并重启」将毫无反应也无提示
     try {
         err := ValidateRecycleBin(editKeepDays.Text, ReadRBTime(editTimeHour, editTimeMin))
+        if err = ""
+            err := ValidateAutoResetSeconds(editResetSecs.Text)
     } catch as e {
         err := "保留天数 / 执行时刻需填写有效数字（" e.Message "）"
     }
@@ -67,9 +70,12 @@ SaveSettings(GuiObj, IndicatorOn, PasteOn, ScreenshotOn, StartupOn, SplashOn, De
         IniWrite (SplashOn ? 1 : 0), CONFIG_FILE, "Features", "SplashEnabled"
         IniWrite (rbOn ? 1 : 0), CONFIG_FILE, "Features", "RecycleBinEnabled"
         IniWrite (AutoUpdateOn ? 1 : 0), CONFIG_FILE, "Features", "AutoUpdateEnabled"
+        IniWrite (autoResetOn ? 1 : 0), CONFIG_FILE, "Features", "AutoResetEnglishEnabled"
         ; 回收站参数配置写回（重启后由 Config.ahk 读取，RecycleBin.ahk 生效）
         IniWrite Integer(editKeepDays.Text), CONFIG_FILE, "RecycleBin", "KeepDays"
         IniWrite ReadRBTime(editTimeHour, editTimeMin), CONFIG_FILE, "RecycleBin", "Time"
+        ; 自动复位空闲秒数写回（重启后由 Config.ahk 读取并夹取到合法区间）
+        IniWrite Integer(NormalizeDigits(editResetSecs.Text)), CONFIG_FILE, "AutoReset", "IdleSeconds"
         ; 快捷键配置写回（重启后由 Hotkeys.ahk 读取并动态注册）
         IniWrite editPasteKey.Value, CONFIG_FILE, "Hotkeys", "PastePlain"
         IniWrite editShotKey.Value, CONFIG_FILE, "Hotkeys", "Screenshot"
@@ -105,6 +111,25 @@ ValidateRecycleBin(keepDays, time) {
     return ""
 }
 
+; 校验「空闲自动复位到英文」的空闲秒数：整数且在 [AUTO_RESET_MIN_SECONDS, AUTO_RESET_MAX_SECONDS] 内
+; 合法返回空串；先归一化（去空白 + 全角转半角）再用 IsIntText 判定，处理中文输入法全角数字
+ValidateAutoResetSeconds(text) {
+    global AUTO_RESET_MIN_SECONDS, AUTO_RESET_MAX_SECONDS
+    v := NormalizeDigits(text)
+    if !IsIntText(v)
+        return "空闲秒数需为整数（" AUTO_RESET_MIN_SECONDS "-" AUTO_RESET_MAX_SECONDS "）"
+    if (Integer(v) < AUTO_RESET_MIN_SECONDS || Integer(v) > AUTO_RESET_MAX_SECONDS)
+        return "空闲秒数需在 " AUTO_RESET_MIN_SECONDS " - " AUTO_RESET_MAX_SECONDS " 秒之间"
+    return ""
+}
+
+; 指示器开关联动：关闭指示器时禁用「空闲自动复位到英文」相关控件（中/英状态检测不再运行）
+_ToggleAutoResetEnabled(On, cbAutoReset, editResetSecs, uddResetSecs) {
+    cbAutoReset.Enabled := On
+    editResetSecs.Enabled := On
+    uddResetSecs.Enabled := On
+}
+
 ; 重启脚本（设置保存 / 托盘「重启」共用）
 ; Reload 前先隐藏托盘图标：AHK 退出时不总是主动移除托盘图标，
 ; 残留的旧图标需鼠标悬停通知区域才被系统刷新清除（Windows 缓存行为），
@@ -129,6 +154,7 @@ OpenSettings() {
     global StartupEnabled, SplashEnabled, DesktopShortcutEnabled
     global PastePlainKey, ScreenshotKey
     global RecycleBinEnabled, RBKeepDays, RBTime
+    global AutoResetEnglishEnabled, AutoResetIdleSeconds, AUTO_RESET_MIN_SECONDS, AUTO_RESET_MAX_SECONDS
 
     ; 窗口已打开时前置显示，避免重复创建
     if WinExist("设置 - " MENU_TITLE) {
@@ -156,9 +182,21 @@ OpenSettings() {
 
     ; ---- 指示器页 ----
     tabCtl.UseTab(2)
-    settingsGui.Add("GroupBox", "x28 y40 w332 h116", "功能开关")
+    settingsGui.Add("GroupBox", "x28 y40 w332 h150", "功能开关")
     cbIndicator := settingsGui.Add("CheckBox", "x44 y64 w306", "输入状态指示器")
     cbIndicator.Value := IndicatorEnabled
+    ; 空闲自动复位到英文：依赖指示器提供中/英状态，指示器关闭时联动禁用
+    cbAutoReset := settingsGui.Add("CheckBox", "x44 y92 w306", "自动复位到英文")
+    cbAutoReset.Value := AutoResetEnglishEnabled
+    settingsGui.Add("Text", "x44 y124 w64 h20", "空闲秒数")
+    editResetSecs := settingsGui.Add("Edit", "x110 y120 w48")
+    uddResetSecs := settingsGui.Add("UpDown", "Range" AUTO_RESET_MIN_SECONDS "-" AUTO_RESET_MAX_SECONDS)
+    uddResetSecs.Value := AutoResetIdleSeconds
+    editResetSecs.Text := Format("{}", uddResetSecs.Value)
+    cbAutoReset.Enabled := IndicatorEnabled
+    editResetSecs.Enabled := IndicatorEnabled
+    uddResetSecs.Enabled := IndicatorEnabled
+    cbIndicator.OnEvent("Click", (*) => _ToggleAutoResetEnabled(cbIndicator.Value, cbAutoReset, editResetSecs, uddResetSecs))
 
     ; ---- 剪贴板页：纯文本粘贴（开关 + 跟随页签的快捷键文本框）----
     tabCtl.UseTab(3)
@@ -232,7 +270,7 @@ OpenSettings() {
     ; ---- 页签外：底部按钮 ----
     tabCtl.UseTab()    ; 回到页签外，底部按钮不受页签切换影响
     btnSave := settingsGui.Add("Button", "x210 y264 w116 h28", "保存并重启")
-    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, cbDesktopShortcut.Value, cbAutoUpdate.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin))
+    btnSave.OnEvent("Click", (*) => SaveSettings(settingsGui, cbIndicator.Value, cbPaste.Value, cbScreenshot.Value, cbStartup.Value, cbSplash.Value, cbDesktopShortcut.Value, cbAutoUpdate.Value, editPasteKey, editShotKey, rbCheck.Value, editKeepDays, editTimeHour, editTimeMin, cbAutoReset.Value, editResetSecs))
     btnCancel := settingsGui.Add("Button", "x326 y264 w56 h28", "取消")
     btnCancel.OnEvent("Click", (*) => CloseSettings(settingsGui))
 

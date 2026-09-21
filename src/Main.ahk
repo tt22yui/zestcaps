@@ -17,6 +17,7 @@ DebugLog("启动耗时: Splash 加载完成 " (A_TickCount - SCRIPT_LOAD_START) 
 #Include "Indicator\IME.ahk"            ; 输入法状态检测
 #Include "Indicator\Indicator.ahk"    ; 输入状态指示器
 #Include "InputSwitch\CapsLock.ahk"    ; CapsLock 键行为
+#Include "InputSwitch\AutoResetEnglish.ahk"  ; 空闲自动复位到英文（依赖指示器）
 #Include "Clipboard\Clipboard.ahk"            ; 剪贴板模块（纯文本粘贴）
 #Include "Screenshot\Screenshot.ahk"  ; 简单截图
 DebugLog("启动耗时: Screenshot 加载完成 " (A_TickCount - SCRIPT_LOAD_START) " ms")
