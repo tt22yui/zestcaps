@@ -182,7 +182,7 @@ OpenSettings() {
     ; 布局对齐其他页签：标签左缘 x44、输入框统一起点 x110，两行按同网格排列
     tabCtl.UseTab(5)
     settingsGui.Add("GroupBox", "x28 y40 w332 h150", "定时清空回收站")
-    rbCheck := settingsGui.Add("CheckBox", "x44 y62 w306", "每天自动清空回收站（保留近 N 天）")
+    rbCheck := settingsGui.Add("CheckBox", "x44 y62 w306", "自动清理回收站")
     rbCheck.Value := RecycleBinEnabled
     ; 保留天数：可编辑下拉框（7/15/30 常用档位可点选，也允许直接键入任意 ≥1 的值）
     ; 初值用 .Text 回显 config 当前值（含非档位值）——旧实现用 DropDownList 固定档位，
@@ -204,7 +204,6 @@ OpenSettings() {
     uddTimeMin.Value  := Integer(SubStr(RBTime, 4, 2))
     editTimeHour.Text := Format("{:02}", uddTimeHour.Value)
     editTimeMin.Text  := Format("{:02}", uddTimeMin.Value)
-    settingsGui.Add("Text", "x44 y156 w312 h20", "上下微调或直接输入 24 时制")
 
     ; ---- 关于页：版本信息 + 自动更新（精简文字，沿用 x28/x44 对齐网格）----
     tabCtl.UseTab(6)
