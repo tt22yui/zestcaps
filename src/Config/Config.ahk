@@ -110,6 +110,7 @@ SCREENSHOT_FILENAME     := "Screen yyyyMMdd-HHmmss.png"   ; 截图默认文件�
 SCREENSHOT_TIMEOUT_MS   := 30000                          ; 截图流程超时（毫秒）：按 F1 后超时未完成自动取消并恢复屏幕，防止蒙版卡住
 MASK_COLOR              := 0x1F1F1F                     ; 截图蒙版颜色（PixPin 风格：深灰近黑，选区外内容明显变暗突出选区）
 MASK_TRANSPARENCY       := 96                             ; 截图蒙版透明度（0-255，越大越不透明）
+MASK_FADE_MS            := 120                            ; 截图蒙版淡入时长（毫秒）：0=不淡入，给启动一个明确的过渡
 SEL_ALPHA               := 1                              ; 选区内部透明拦截层透明度（1=几乎不可见，用于拦截洞内点击防穿透）
 SMALL_DELTA             := 5                              ; 鼠标移动超过该距离才刷新窗口高亮（像素）
 DRAG_THRESHOLD          := 5                              ; 单击与拖动的判定阈值（像素）

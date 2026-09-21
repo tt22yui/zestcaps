@@ -48,8 +48,9 @@ MoveWindowFast(hwnd, x, y, w, h) {
 ; 尺寸变化重绘（实测 4.6ms/次），且无多窗口接缝线/贯穿全屏的透明线
 ; ------------------------------------------------------------------
 
-; 创建蒙版，返回对象 {gui, hwnd, shown, last, mx, my, mw, mh}
+; 创建蒙版，返回对象 {gui, hwnd, shown, faded, last, mx, my, mw, mh}
 ; shown：是否已 Show（首次 Show 定位，后续仅改挖洞 region）
+; faded：是否已执行过淡入（MaskOverlayFadeIn 幂等，编辑器继承的蒙版不重复淡入）
 ; last：上次矩形 {x,y,w,h}，未变化时跳过（避免每帧 SetWindowRgn 重绘导致闪烁）
 MaskOverlayCreate() {
     global MASK_COLOR, MASK_TRANSPARENCY
@@ -59,7 +60,38 @@ MaskOverlayCreate() {
     g := Gui("-Caption +ToolWindow +AlwaysOnTop -DPIScale +E0x08000000")
     g.BackColor := MASK_COLOR
     WinSetTransparent MASK_TRANSPARENCY, g
-    return { gui: g, hwnd: g.Hwnd, shown: false, last: {x: -1, y: -1, w: -1, h: -1}, mx: mx, my: my, mw: mw, mh: mh }
+    return { gui: g, hwnd: g.Hwnd, shown: false, faded: false, last: {x: -1, y: -1, w: -1, h: -1}, mx: mx, my: my, mw: mw, mh: mh }
+}
+
+; 蒙版淡入：把蒙版由全透明渐变到 MASK_TRANSPARENCY（约 MASK_FADE_MS），给截图启动一个明确过渡
+; 需在首次 Show 之前调用（未显示时改透明度不会闪），定时器驱动、不阻塞；幂等，同一蒙版只淡入一次
+; （编辑器继承的蒙版已淡入过，不会再触发；MASK_FADE_MS<=0 时直接置为目标透明度）
+MaskOverlayFadeIn(ov) {
+    global MASK_TRANSPARENCY, MASK_FADE_MS
+    if !ov || ov.faded
+        return
+    ov.faded := true
+    if (MASK_FADE_MS <= 0) {
+        try WinSetTransparent MASK_TRANSPARENCY, ov.gui
+        return
+    }
+    try WinSetTransparent 0, ov.gui
+    fade := { start: A_TickCount }
+    fade.tick := () => _MaskFadeTick(ov, fade)
+    SetTimer fade.tick, 16
+}
+
+; 淡入步进：按已用时间线性推进透明度，到达时长即定为目标值并停表（窗口已销毁时静默停止）
+_MaskFadeTick(ov, fade) {
+    global MASK_TRANSPARENCY, MASK_FADE_MS
+    elapsed := A_TickCount - fade.start
+    if (elapsed >= MASK_FADE_MS) {
+        SetTimer fade.tick, 0
+        try WinSetTransparent MASK_TRANSPARENCY, ov.gui
+        return
+    }
+    a := Max(1, Round(MASK_TRANSPARENCY * elapsed / MASK_FADE_MS))
+    try WinSetTransparent a, ov.gui
 }
 
 ; 构建「全屏减矩形」挖洞 region（4 矩形并集），返回 GDI region 句柄

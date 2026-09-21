@@ -85,6 +85,7 @@ _SelectionCreate(region, state) {
 
     ; 覆盖层（Common\Overlay.ahk 共享组件）：全屏灰度蒙版（单窗口挖洞）+ 4 条天蓝边框窗口
     maskOv := MaskOverlayCreate()
+    MaskOverlayFadeIn(maskOv)   ; 启动过渡：蒙版由透明渐显（在首次 Show 前置 0，避免闪现）
     borders := BorderStripsCreate()
 
     ; 选区透明拦截层（alpha 极小，几乎不可见，盖住选区防止点击穿透）
@@ -114,12 +115,44 @@ _SelectionCreate(region, state) {
     state.hoverX := tx
     state.hoverY := ty
 
+    ; 十字光标：进入选区即切换（等待按下/拖框期间保持），进入微调阶段后交 AdjustSetCursor 按命中区切换
+    OnMessage(0x20, _SelectionCrossCursor)
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32515))  ; IDC_CROSS
+
     ; 取消热键：右键（独立）；Esc 走统一分发（截图阶段优先取消选区，不覆盖钉屏热键）
     Hotkey "*RButton", (*) => (state.canceled := true), "On"
     ScreenshotEscCancel := () => (state.canceled := true)
     EscRegister()
 
     return {mask: maskOv, borders: borders, selGui: selGui, selLast: selLast}
+}
+
+; ------------------------------------------------------------------
+; 选区阶段十字光标：等待按下 / 拖框期间（WM_SETCURSOR 0x20）保持十字，
+; 明确「截图模式」已激活；微调阶段改由 AdjustSetCursor 按命中区切换方向光标
+; 仅响应本流程的蒙版/边框/拦截层，返回 true 阻止默认箭头覆盖；其它窗口裸 return 交默认处理
+; ------------------------------------------------------------------
+_SelectionCrossCursor(wParam, lParam, msg, hwnd) {
+    global ScreenshotMaskHwnds, ScreenshotSelHwnd, ScreenshotBorderHwnds
+    hit := (hwnd = ScreenshotSelHwnd)
+    if !hit
+        for h in ScreenshotMaskHwnds {
+            if (hwnd = h) {
+                hit := true
+                break
+            }
+        }
+    if !hit
+        for h in ScreenshotBorderHwnds {
+            if (hwnd = h) {
+                hit := true
+                break
+            }
+        }
+    if !hit
+        return
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32515))  ; IDC_CROSS
+    return true
 }
 
 ; 等待左键按下（进入拖动阶段）：返回 true=已按下，false=取消/超时
@@ -227,6 +260,7 @@ _DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
     global ScreenshotMaskHwnds, ScreenshotSelHwnd, ScreenshotBorderHwnds, ScreenshotEscCancel
     global ToolbarHoverActive, EditorToolbar, EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
     try Hotkey "*RButton", "Off"
+    OnMessage(0x20, _SelectionCrossCursor, 0)  ; 注销十字光标回调（未进入微调即取消/快速截图路径的兜底）
     if ScreenshotEscCancel {
         ScreenshotEscCancel := 0
         EscUnregister()  ; 仅在截图阶段 Esc 仍注册时注销（防止与正常路径重复递减）
@@ -319,6 +353,7 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
     OnMessage(0x200, AdjustMouseMove)
     OnMessage(0x202, AdjustLButtonUp)
     OnMessage(0x203, AdjustLButtonDblClk)
+    OnMessage(0x20, _SelectionCrossCursor, 0)  ; 退出十字光标阶段，改由 AdjustSetCursor 按命中区切换
     OnMessage(0x20, AdjustSetCursor)  ; WM_SETCURSOR：悬停选区边角/内部时切换方向光标
     try {
         ; 等待工具栏动作或取消（动作由工具栏按钮回调写入全局 ScreenToolbarResult）
