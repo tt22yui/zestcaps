@@ -176,10 +176,11 @@ ShowToolbarRowsAnimated() {
     ToolbarPlaceUnder(rows, {l: ex, t: ey, r: ex + EditorWinW, b: ey + EditorWinH})
     EditorToolbar.GetPos(&fx, &fy)           ; row1 目标（第一行）
     EditorColorToolbar.GetPos(&cx, &cy)      ; row2 目标（第二行）
-    ; 回滚到动画起点：row1 回原位；row2 紧贴 row1 下缘、先全透明（从贴合处向下展开）
+    ; 回滚到动画起点：row1 回原位；row2 用**自己的居中 X(cx)**、紧贴 row1 下缘且先全透明（从贴合处向下展开）
+    ; 注意：row2 与 row1 宽度不同，不能复用 row1 的 X(fx)，否则动画落地后颜色行会偏左、两行中心不对齐
     EditorToolbar.Move(sx, sy)
     r2StartY := fy + EditorToolbarH
-    EditorColorToolbar.Move(fx, r2StartY)
+    EditorColorToolbar.Move(cx, r2StartY)
     try WinSetTransparent 0, "ahk_id " EditorColorToolbar.Hwnd
     ; 显示两行（row1 本就可见，Show 无副作用；row2 首次 Show）
     EditorToolbar.Show("NA")
@@ -187,7 +188,7 @@ ShowToolbarRowsAnimated() {
     _ToolbarTransitionRun({r1: EditorToolbar, r2: EditorColorToolbar
         , sx: sx, sy: sy, fx: fx, fy: fy
         , w1: EditorToolbarW, h1: EditorToolbarH, w2: EditorColorToolbarW, h2: EditorColorToolbarH
-        , r2x: fx, r2sy: r2StartY, r2ey: cy, dur: 160})
+        , r2x: cx, r2sy: r2StartY, r2ey: cy, dur: 160})
 }
 
 ; ---------------------------------------------------------------
