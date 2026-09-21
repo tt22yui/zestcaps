@@ -194,9 +194,10 @@ class ToolbarHoverState {
 
     ; 创建图标按钮（纯图标、无文字）：统一 24 高，垂直水平居中，登记到悬停列表。
     ; 用图标字体渲染字形并收窄宽度（Icon 宽 30）；选中/悬停仍走统一处理（背景+文字色，
-    ; 与文字按钮一致），仅字形与宽度不同。tip 为悬停工具提示（可为空）。字体选择：
-    ; 几何绘图类用 "Segoe UI Symbol"、系统动作类用 "Segoe MDL2 Assets"（图标字体在普通
-    ; 中西文字体下会缺字，故必须显式指定）。字号 s15 与尺寸一样由工具栏 DPI 缩放（等比居中）。
+    ; 与文字按钮一致），仅字形与宽度不同。tip 为悬停工具提示（可为空）。字体统一用
+    ; "Segoe MDL2 Assets"：其字形共用固定字宽、字面高度与定位一致，混排在一条工具栏里
+    ; 大小与基线天然对齐（图标字体在普通中西文字体下会缺字，故必须显式指定）。
+    ; 字号 s15 与尺寸一样由工具栏 DPI 缩放（等比居中）。
     AddIcon(tb, glyph, fontFace, callback, tip := "") {
         global EDIT_TB_BTN_BG, EDIT_TB_BTN_TEXT
         c := tb.Add("Text", "x+m w" ToolbarDpi(30) " h" ToolbarDpi(24) " Center 0x200 Background" EDIT_TB_BTN_BG " c" EDIT_TB_BTN_TEXT, glyph)

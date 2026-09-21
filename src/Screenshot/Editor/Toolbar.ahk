@@ -57,10 +57,13 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
 
     ; 工具按钮区（PixPin 风格：矩形 / 箭头 / 椭圆 / 马赛克，选中态由 EditorToolbarRefresh 刷新）
     ; 点击行为由 ToolbarPhase 分流：选区阶段=选工具+自动选第1色+进入编辑；编辑阶段=仅切工具
-    ; 纯图标改版：几何绘图类用 Segoe UI Symbol 字形（▭矩形 →箭头 ◯椭圆 ▦马赛克 ✎画笔）
-    tools := [["▭", "rect", "矩形"], ["→", "arrow", "箭头"], ["◯", "ellipse", "椭圆"], ["T", "text", "文本"], ["▦", "mosaic", "马赛克"], ["✎", "brush", "画笔"]]
+    ; 统一用 Segoe MDL2 Assets：同一字体下各字形共用固定字宽与一致字面高度，
+    ; 天然对齐、光学尺寸接近；此前的几何字形（Segoe UI Symbol，▭→◯▦✎）字面大小/基线不一，
+    ; 与输出组 MDL2 图标混排时「大小不一、不齐」（E739 方框 / E72A 箭头 / EA3A 圆环 /
+    ; E8D2 文字 / ECA5 马赛克 / ED64 画笔）
+    tools := [[Chr(0xE739), "rect", "矩形"], [Chr(0xE72A), "arrow", "箭头"], [Chr(0xEA3A), "ellipse", "椭圆"], [Chr(0xE8D2), "text", "文本"], [Chr(0xECA5), "mosaic", "马赛克"], [Chr(0xED64), "brush", "画笔"]]
     for t in tools {
-        c := tb.HoverState.AddIcon(tb, t[1], "Segoe UI Symbol", ToolbarToolClick.Bind(t[2]), t[3])
+        c := tb.HoverState.AddIcon(tb, t[1], "Segoe MDL2 Assets", ToolbarToolClick.Bind(t[2]), t[3])
         EditorToolButtons[t[2]] := c
     }
 
