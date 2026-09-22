@@ -354,15 +354,18 @@ HandleUpdateDone(btnUpdate, updProg, updStatus, result, pulse) {
 
 ; 下载并替换；把下载/校验/替换过程中的状态与失败原因回写到窗口
 ; （此前失败只走 TrayTip、界面永远停在"正在下载更新…"，用户看不到任何反馈＝以为"只检查不更新"）
+; 注：下载改为异步（不阻塞 UI 线程），失败经 done 回调恢复按钮；成功路径会 ExitApp 重启
 DownloadAndReplaceResult(exeUrl, shaUrl, updStatus, btnUpdate) {
     updStatus.Text := "正在下载更新…完成后将自动替换并重启。"
     btnUpdate.Enabled := false
     btnUpdate.Text := "下载中…"
-    ; Download 是同步阻塞调用，这里先让上面的文本真正画出来（Sleep 期间 AHK 会处理窗口消息）
-    Sleep 60
-    ok := DownloadAndReplace(exeUrl, shaUrl, (msg) => (updStatus.Text := msg, updStatus.Redraw()))
+    DownloadAndReplace(exeUrl, shaUrl, (msg) => (updStatus.Text := msg, updStatus.Redraw()), (ok) => DownloadAndReplaceDone(ok, btnUpdate))
+}
+
+; 下载结束（仅失败会走到这里；成功会 ExitApp 重启）：恢复按钮让用户可直接重试
+; （待下载状态仍在，故按钮仍是「下载并更新 vX.Y.Z」）
+DownloadAndReplaceDone(ok, btnUpdate) {
     if !ok {
-        ; 失败：恢复按钮让用户可直接重试（待下载状态仍在，故按钮仍是「下载并更新 vX.Y.Z」）
         btnUpdate.Enabled := true
         RefreshUpdateButton(btnUpdate)
     }
