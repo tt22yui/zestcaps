@@ -35,6 +35,32 @@ MoveWindowFast(hwnd, x, y, w, h) {
 }
 
 ; ------------------------------------------------------------------
+; 分层窗口刷新：把 GDI+ 位图呈现到分层窗口（钉屏 / 编辑窗共用，P1-4 去重）
+; 尺寸取位图自然尺寸；alpha 默认 255（不透明，由层内像素 alpha 决定圆角/透明）
+; 返回 true=已更新；false=GDI 句柄创建失败（调用方保持上一帧内容，不崩不闪）
+; ------------------------------------------------------------------
+LayeredWindowFromBitmap(hwnd, pBmp, alpha := 255) {
+    Gdip_GetImageDimensions(pBmp, &w, &h)
+    hBitmap := Gdip_CreateHBITMAPFromBitmap(pBmp)
+    hdc := CreateCompatibleDC()
+    ; 任一创建失败都必须立即退出：否则会拿 0 句柄继续 SelectObject/UpdateLayeredWindow，
+    ; 且已成功创建的句柄会因提前返回而泄漏
+    if (!hBitmap || !hdc) {
+        if hBitmap
+            DeleteObject(hBitmap)
+        if hdc
+            DeleteDC(hdc)
+        return false
+    }
+    obm := SelectObject(hdc, hBitmap)
+    UpdateLayeredWindow(hwnd, hdc, , , w, h, alpha)
+    SelectObject(hdc, obm)
+    DeleteObject(hBitmap)
+    DeleteDC(hdc)
+    return true
+}
+
+; ------------------------------------------------------------------
 ; 蒙版：全屏单窗口挖洞
 ; 灰色半透明盖住全屏，矩形处挖洞露出下层（选区 / 编辑窗内容），并拦截非矩形区点击
 ; 单窗口挖洞仅需 SetWindowRgn 换 region（实测 0.63ms/次），远快于 4 块窗口的

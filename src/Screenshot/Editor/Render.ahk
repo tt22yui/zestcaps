@@ -64,14 +64,8 @@ EditorRender() {
         EditorDrawAnnotation(G, EditorPending, EditorScale)
     Gdip_DeleteGraphics(G)
 
-    ; 更新分层窗口
-    hBitmap := Gdip_CreateHBITMAPFromBitmap(EditorWorkBitmap)
-    hdc := CreateCompatibleDC()
-    obm := SelectObject(hdc, hBitmap)
-    UpdateLayeredWindow(EditorHwnd, hdc, , , EditorWinW, EditorWinH)
-    SelectObject(hdc, obm)
-    DeleteObject(hBitmap)
-    DeleteDC(hdc)
+    ; 更新分层窗口（通用实现见 Overlay.ahk 的 LayeredWindowFromBitmap）
+    LayeredWindowFromBitmap(EditorHwnd, EditorWorkBitmap)
 }
 
 ; ------------------------------------------------------------------

@@ -190,27 +190,10 @@ PinCleanupAsync(hwnd) {
     return 0
 }
 
-; 把工作 bitmap 渲染到钉屏分层窗口
+; 把工作 bitmap 渲染到钉屏分层窗口（通用实现见 Overlay.ahk 的 LayeredWindowFromBitmap）
 ; 返回 true=已更新；false=GDI 句柄创建失败（窗口保持上一帧内容，不崩不闪）
 _PinUpdateLayer(hwnd, pBmp) {
-    Gdip_GetImageDimensions(pBmp, &w, &h)
-    hBitmap := Gdip_CreateHBITMAPFromBitmap(pBmp)
-    hdc := CreateCompatibleDC()
-    ; 任一创建失败都必须立即退出：否则会拿 0 句柄继续 SelectObject/UpdateLayeredWindow，
-    ; 且已成功创建的句柄会因提前返回而泄漏
-    if (!hBitmap || !hdc) {
-        if hBitmap
-            DeleteObject(hBitmap)
-        if hdc
-            DeleteDC(hdc)
-        return false
-    }
-    obm := SelectObject(hdc, hBitmap)
-    UpdateLayeredWindow(hwnd, hdc, , , w, h)
-    SelectObject(hdc, obm)
-    DeleteObject(hBitmap)
-    DeleteDC(hdc)
-    return true
+    return LayeredWindowFromBitmap(hwnd, pBmp)
 }
 
 ; ------------------------------------------------------------------
