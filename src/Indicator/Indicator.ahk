@@ -33,6 +33,11 @@ global indicatorBriefShow := false
 ; 时间分辨率是否有本进程的提升，供退出时配对 timeEndPeriod
 global indicatorTimePeriodRaised := false
 
+; 淡入淡出全局状态：必须在下方 if IndicatorEnabled 首次调用 _UpdateIndicator 之前初始化，
+; 否则首次 StartIndicatorFade 启动的 _IndicatorFadeStep 定时器会读到未赋值的全局而抛错
+global indAlpha := 0          ; 当前窗口透明度 0-255
+global indFadeHide := false   ; 本次淡出完成后是否需要隐藏窗口
+
 ; 按需抬高系统计时精度（P1-5 性能热点）：仅在指示器可见（跟随 IBeam 光标或短暂强制显示）时
 ; 抬到 1ms，保证 10ms 位置刷新顺滑；隐藏时立即还原——避免常驻抬高整机时钟中断频率的持续耗电。
 IndicatorSetTimePeriod(on) {
@@ -176,8 +181,8 @@ _UpdateIndicator() {
 ; ==================================================================
 ; 淡入淡出控制（分层窗口透明度动画）
 ; ==================================================================
-global indAlpha := 0          ; 当前窗口透明度 0-255
-global indFadeHide := false   ; 本次淡出完成后是否需要隐藏窗口
+; indAlpha / indFadeHide 两个全局状态在文件顶部（indicatorTimePeriodRaised 之后）初始化，
+; 确保早于 if IndicatorEnabled 的首次 _UpdateIndicator 调用
 
 ; 设置窗口透明度：用 WinSetTransparent 自动管理 WS_EX_LAYERED（设数值即临时上分层，Off 还原普通窗）。
 ; 这样跟随阶段保持普通窗口位移最平滑，仅在淡入淡出瞬间才处于分层态。

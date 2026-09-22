@@ -40,6 +40,7 @@ tests := [
     "Load\test_updater_load.ahk",
     "Load\test_compile_load.ahk",
     "Splash\test_splash_skip.ahk",
+    "Splash\test_splash_on.ahk",
     "TrayMenu\test_traymenu_load.ahk",
 ]
 

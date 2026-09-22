@@ -17,6 +17,15 @@ global SPLASH_TITLE_COLOR, SPLASH_SUB_COLOR
 global SPLASH_CHIP_IDLE, SPLASH_CHIP_TEXT, SPLASH_FONT_TITLE, SPLASH_FONT_CJK
 global SPLASH_ACCENT_CN, SPLASH_ACCENT_EN, SPLASH_ACCENT_A
 global SplashEnabled
+; 字体/格式缓存必须在下方首次绘制（if SplashEnabled 块内调用 _SplashDraw）之前初始化：
+; 自动执行段自上而下执行，若初始化语句排到调用之后，首次 _SplashGetFont 读取未赋值的全局
+; 会抛「This global variable has not been assigned a value」导致启动失败
+global _splashFontCache := Map()   ; "font|size|bold" -> {family, font}（会话内复用，退出时随 _SplashCleanup 释放）
+global _splashTextFormat := 0      ; 共享的 Center 对齐 StringFormat
+; 运行时句柄/标志预置默认值：初始化中途失败时 _SplashCleanup 会读取这些全局做兜底释放，
+; 若不预置，未走到赋值行就出错会导致清理函数自身再抛「全局变量未赋值」，掩盖原始错误
+global splashInit := false, splashToken := 0, splashG := 0, splashHdc := 0
+global splashHbm := 0, splashObm := 0, SplashGUI := 0
 
 ; 闪屏开关关闭时跳过整个闪屏流程（设置界面可开启）
 if SplashEnabled {
@@ -153,10 +162,8 @@ _SplashDraw(G, elapsed) {
 ; 绘制文本：水平居中 + 垂直按行高估算居中
 ; 直接调用 gdiplus 图元绘制（库的 Gdip_TextToGraphics 为 v1 移植，存在兼容性问题，故绕开）
 ; 字体与 StringFormat 建一次缓存复用：动画每帧要画 5 段文本，原实现每帧每段都新建/销毁
-; 字体对象（约 300 次/秒）是启动期的性能热点。
+; 字体对象（约 300 次/秒）是启动期的性能热点。缓存全局在文件顶部初始化。
 ; ------------------------------------------------------------------
-global _splashFontCache := Map()   ; "font|size|bold" -> {family, font}（会话内复用，退出时随 _SplashCleanup 释放）
-global _splashTextFormat := 0      ; 共享的 Center 对齐 StringFormat
 
 _SplashGetFont(font, size, bold) {
     global _splashFontCache
