@@ -6,7 +6,7 @@
 ;   - _DestroyOverlays 销毁 row1 时同步清按钮引用
 ;
 ; 按 Main.ahk 真实加载顺序加载（Config → DebugLog → Screenshot 链式 Include）。
-; 带看门狗（5 秒强制清理并退出）；结果写 %TEMP%\_tmp_scroll_toolbar.txt（用完即删）
+; 带看门狗（15 秒强制清理并退出）；结果写 %TEMP%\_tmp_scroll_toolbar.txt（用完即删）
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #ErrorStdOut
@@ -21,11 +21,11 @@ if FileExist(resultFile)
 #Include "..\..\src\DebugLog\DebugLog.ahk"
 #Include "..\..\src\Screenshot\Screenshot.ahk"
 
-SetTimer(Watchdog, -5000)
+SetTimer(Watchdog, -15000)
 Watchdog() {
     _Cleanup()
     try FileAppend "TIMEOUT 看门狗触发`n", A_Temp "\_tmp_scroll_toolbar.txt"
-    ExitApp 0
+    ExitApp 1   ; 超时按失败计（非零退出，聚合器/CI 可见）
 }
 
 failCount := 0

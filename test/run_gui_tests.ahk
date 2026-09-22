@@ -12,7 +12,8 @@
 ;
 ; 未纳入本套件（原因）：
 ;   - test\Startup、test\DesktopShortcut：会真实创建/删除开始菜单与桌面快捷方式，副作用落到用户系统；
-;   - test\Splash、test\TrayMenu、test\Load\*：加载型检查，已由 test\Load\test_main_load.ahk 覆盖。
+;   - test\Clipboard\test_clip_menu(_send)：两进程配合 + 模态菜单，属手动验证，不适合自动化聚合；
+;   - test\Diagnostics\test_input_freeze_probe：诊断探针，非回归用例。
 ; ==================================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
@@ -34,6 +35,12 @@ tests := [
     "Screenshot\test_pin_resize.ahk",
     ; 设置窗口
     "Settings\test_settings_gui.ahk",
+    ; 加载 / 冒烟（执行各模块顶层代码，补上此前无人聚合的孤儿用例）
+    "Load\test_main_load.ahk",
+    "Load\test_updater_load.ahk",
+    "Load\test_compile_load.ahk",
+    "Splash\test_splash_skip.ahk",
+    "TrayMenu\test_traymenu_load.ahk",
 ]
 
 ; 向 stdout 写入（无重定向时 "*" 句柄无效，try 静默：与 run_all_tests.ahk 同策略）

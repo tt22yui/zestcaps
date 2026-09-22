@@ -20,10 +20,14 @@ SplashEnabled := false
 
 f := A_Temp "\_tmp_splash_skip_test.txt"
 try FileDelete(f)
+failed := false
 try {
     ok := IsSet(StartupEnabled) && IsSet(SetStartup) && IsSet(OpenSettings) && IsSet(InitTrayMenu)
     FileAppend (ok ? "OK: 闪屏关闭后后续模块加载正常`n" : "FAIL: 后续模块未加载`n"), f
+    if !ok
+        failed := true
 } catch as err {
     FileAppend "FAIL: " err.Message " @" err.Line "`n", f
+    failed := true
 }
-ExitApp()
+ExitApp failed ? 1 : 0

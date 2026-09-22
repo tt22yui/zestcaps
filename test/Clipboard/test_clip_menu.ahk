@@ -30,4 +30,4 @@ m.Show()
 
 if !hit
     FileAppend "FAIL 数字键未能激活菜单项`n", resultFile
-ExitApp 0
+ExitApp hit ? 0 : 1   ; 未命中按失败计（非零退出）

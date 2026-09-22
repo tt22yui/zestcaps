@@ -27,7 +27,13 @@ try FileDelete(testFile)
 failCount := 0   ; 任一段 FAIL 即非零退出（此前恒 ExitApp 0，失败对调用方/CI 完全不可见）
 
 ; 看门狗：15 秒强制退出，防止测试期间创建的窗口残留（Updater 纯逻辑验证需要比原来多几个毫秒但整体仍远小于 15 秒）
-SetTimer(() => ExitApp(), 15000)
+; 超时按失败计（非零退出），避免“卡住却仍报成功”
+SetTimer(Watchdog, 15000)
+Watchdog() {
+    global testFile
+    try FileAppend "TIMEOUT 看门狗触发`n", testFile
+    ExitApp 1
+}
 
 ; 复现 Main.ahk 的启动耗时打点表达式，验证变量可用、拼接无错
 try {

@@ -3,7 +3,7 @@
 ;   - 「关于」页更新按钮：默认「检查更新」；登记待下载更新后必须**就地变成「下载并更新 vX.Y.Z」**
 ;     （回归：旧实现只弹 Yes/No 模态框，弹窗被关掉/显示失败后界面上再无任何下载入口；
 ;      根因是选项串误写 IconQuestion 使 MsgBox 抛 Invalid option. 并被全局处理器静默吞掉）
-; 带看门狗（5 秒强制关闭窗口并退出），结果写入 %TEMP%\_tmp_settings_gui.txt
+; 带看门狗（15 秒强制关闭窗口并退出），结果写入 %TEMP%\_tmp_settings_gui.txt
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #ErrorStdOut
@@ -27,8 +27,8 @@ DEBUG_LOG_ENABLED := false                 ; 屏蔽日志写入
 #Include "..\..\src\Common\Gdip_All_v2.ahk"
 #Include "..\..\src\Settings\Settings.ahk"
 
-; 看门狗：5 秒强制关闭窗口并退出（防止窗口残留/卡死打扰用户）
-SetTimer Watchdog, -5000
+; 看门狗：15 秒强制关闭窗口并退出（防止窗口残留/卡死打扰用户）
+SetTimer Watchdog, -15000
 Watchdog() {
     global resultFile
     try {
@@ -36,7 +36,7 @@ Watchdog() {
             WinClose("设置 - " MENU_TITLE)
         FileAppend "TIMEOUT 看门狗触发`n", resultFile
     }
-    ExitApp 0
+    ExitApp 1   ; 超时按失败计（非零退出，聚合器/CI 可见）
 }
 
 failCount := 0

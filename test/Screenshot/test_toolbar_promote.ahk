@@ -7,7 +7,7 @@
 ;
 ; 按 Main.ahk 真实加载顺序加载（Config → DebugLog → Screenshot，Editor/ToolbarUI/Overlay 由 Screenshot 链式 Include）。
 ; 普通非分层 Gui 窗口在 headless 环境可用，故直接驱动构建/分发函数做状态机验证；不驱动完整截图流程。
-; 带看门狗（5 秒强制清理全部工具栏窗口并退出）；结果写入 %TEMP%\_tmp_toolbar_promote.txt
+; 带看门狗（15 秒强制清理全部工具栏窗口并退出）；结果写入 %TEMP%\_tmp_toolbar_promote.txt
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #ErrorStdOut
@@ -22,12 +22,12 @@ if FileExist(resultFile)
 #Include "..\..\src\DebugLog\DebugLog.ahk"
 #Include "..\..\src\Screenshot\Screenshot.ahk"
 
-; 看门狗：5 秒强制清理全部工具栏窗口/假编辑窗并退出（与 _DestroyOverlays keep 语义冲突无关，纯兜底）
-SetTimer(Watchdog, -5000)
+; 看门狗：15 秒强制清理全部工具栏窗口/假编辑窗并退出（与 _DestroyOverlays keep 语义冲突无关，纯兜底）
+SetTimer(Watchdog, -15000)
 Watchdog() {
     _Cleanup()
     try FileAppend "TIMEOUT 看门狗触发`n", A_Temp "\_tmp_toolbar_promote.txt"
-    ExitApp 0
+    ExitApp 1   ; 超时按失败计（非零退出，聚合器/CI 可见）
 }
 
 failCount := 0

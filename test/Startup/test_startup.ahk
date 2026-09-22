@@ -18,6 +18,7 @@ try FileDelete(resultFile)
 ; 备份初始状态，测试结束后恢复，不影响用户原有设置
 backupState := IsStartupEnabled()
 lnk := StartupShortcutPath()
+failed := false
 try {
     SetStartup(true)
     r1 := IsStartupEnabled()          ; 开启后应检测到快捷方式
@@ -37,11 +38,14 @@ try {
 
     if (r1 && r2 && r3 && r4 && r5 && r6)
         FileAppend "OK: 开机启动逻辑全部通过", resultFile, "UTF-8"
-    else
+    else {
         FileAppend "FAIL: r1=" r1 " r2=" r2 " r3=" r3 " r4=" r4 " r5=" r5 " r6=" r6, resultFile, "UTF-8"
+        failed := true
+    }
 } catch as err {
     FileAppend "FAIL: " err.Message " @" err.Line, resultFile, "UTF-8"
+    failed := true
 } finally {
     SetStartup(backupState)   ; 恢复用户初始状态
 }
-ExitApp()
+ExitApp failed ? 1 : 0

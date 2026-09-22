@@ -3,7 +3,7 @@
 ;   - PinCreateAsync 会话初始状态（尺寸/缩放系数/手柄尺寸）
 ;   - PinApplyResize 窗口尺寸更新、左上角锚点固定、边框跟随、缩放源重绘
 ;   - 缩小钳制到下限、关闭后会话注销
-; 带看门狗（5 秒强制关闭全部钉屏并退出），结果写入 %TEMP%\_tmp_pin_resize.txt
+; 带看门狗（15 秒强制关闭全部钉屏并退出），结果写入 %TEMP%\_tmp_pin_resize.txt
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #ErrorStdOut
@@ -21,12 +21,12 @@ if FileExist(resultFile)
 
 Gdip_Startup()
 
-; 看门狗：5 秒强制关闭全部钉屏并退出（防止窗口残留/卡死打扰用户）
-SetTimer(Watchdog, -5000)
+; 看门狗：15 秒强制关闭全部钉屏并退出（防止窗口残留/卡死打扰用户）
+SetTimer(Watchdog, -15000)
 Watchdog() {
     PinEscClose()
     try FileAppend "TIMEOUT 看门狗触发`n", A_Temp "\_tmp_pin_resize.txt"
-    ExitApp 0
+    ExitApp 1   ; 超时按失败计（非零退出，聚合器/CI 可见）
 }
 
 failCount := 0
