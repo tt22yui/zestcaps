@@ -12,9 +12,10 @@ set "SRC=%ROOT%src\Main.ahk"
 set "ICON=%ROOT%resources\capslock.ico"
 
 REM ---------- Read version from Config.ahk ----------
-REM 依赖 src\Config\Config.ahk 中形如  APP_VERSION := "0.3.3"  的单行定义（:= 两侧有空格）
+REM 唯一来源：src\Config\Config.ahk 的 APP_VERSION；解析规则由 scripts\read-version.ps1 统一实现，
+REM 与 CI（build.yml 的 version 步骤）共用同一脚本，避免解析规则双份漂移。
 set "VER="
-for /f "tokens=3" %%v in ('findstr /b /c:"APP_VERSION" "%ROOT%src\Config\Config.ahk"') do set "VER=%%~v"
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\read-version.ps1"`) do set "VER=%%v"
 REM 解析失败必须报错退出，不能静默降级成 dev（否则产物名变成 zestcaps_vdev.exe 却仍算成功）
 if not defined VER (
     echo [ERROR] Failed to parse APP_VERSION from src\Config\Config.ahk

@@ -111,11 +111,9 @@ jobs:
         run: |
           # 版本号唯一来源是 src\Config\Config.ahk 的 APP_VERSION；tag 触发时额外校验 tag 与它一致，
           # 否则产物内版本号与 Release/tag 不符：客户端会把同一版本反复当成「有新版本」，陷入更新死循环
-          $line = Get-Content "src\Config\Config.ahk" -Encoding UTF8 |
-            Where-Object { $_ -match '^\s*APP_VERSION\s*:=' } | Select-Object -First 1
-          $m = [regex]::Match($line, '"([^"]+)"')
-          if (-not $m.Success) { throw "未能从 src\Config\Config.ahk 解析 APP_VERSION" }
-          $appVersion = $m.Groups[1].Value
+          # 版本解析与 build.bat 共用同一脚本（scripts\read-version.ps1），避免解析规则双份漂移
+          $appVersion = (& pwsh -NoProfile -File "scripts\read-version.ps1").Trim()
+          if (-not $appVersion) { throw "未能从 src\Config\Config.ahk 解析 APP_VERSION" }
           $ref = "${{ github.ref }}"
           if ($ref -like 'refs/tags/*') {
             $tag = "${{ github.ref_name }}"
@@ -238,26 +236,19 @@ jobs:
             Write-Host "提示：可先在本机用 build.bat 编译，或把官方 Ahk2Exe 放入仓库/自建 release 后更新本步骤的下载地址"
             exit 1
           }
-          $ver = "${{ steps.version.outputs.version }}"
-          $out = "output\zestcaps_v$ver.exe"
-          Write-Host "Compiler: $ahk2exe"
-          Write-Host "Base    : $base"
-          Write-Host "Output  : $out"
-          # 同前：Ahk2Exe 也是 GUI 子系统程序，必须用 Start-Process 读真实退出码
-          # （`& $ahk2exe` 在 PowerShell 7 上 $LASTEXITCODE 取不到值，会把成功误判成失败）；
-          # 数组形式的 -ArgumentList 不会自动加引号，故路径参数自行加引号，防安装路径含空格
-          $cOut = Join-Path $env:RUNNER_TEMP "ahk2exe_out.log"
-          $cErr = Join-Path $env:RUNNER_TEMP "ahk2exe_err.log"
-          $proc = Start-Process -FilePath $ahk2exe -ArgumentList @(
-            "/silent", "/in", "`"src\Main.ahk`"", "/out", "`"$out`"",
-            "/icon", "`"resources\capslock.ico`"", "/base", "`"$base`"", "/compress", "0"
-          ) -Wait -PassThru -RedirectStandardOutput $cOut -RedirectStandardError $cErr
-          $rc = $proc.ExitCode
-          if (Test-Path $cOut) { Get-Content $cOut | ForEach-Object { Write-Host $_ } }
-          if (Test-Path $cErr) { Get-Content $cErr | ForEach-Object { Write-Host $_ } }
-          Write-Host "Ahk2Exe 退出码=$rc"
-          if ($null -eq $rc) { Write-Host "未取到 Ahk2Exe 退出码（进程未正常启动？）"; exit 1 }
-          if ($rc -ne 0) { Write-Host "Ahk2Exe 编译失败，退出码=$rc"; exit 1 }
+          # 统一构建入口：调用仓库根 build.bat（与本地构建同一份逻辑，避免构建逻辑双份）。
+          # build.bat 经 AHK_ROOT 找 Compiler\Ahk2Exe.exe 与 AutoHotkey64.exe（或 v2\AutoHotkey64.exe）；
+          # 这里把已发现的 ahk2exe 放到 base 根下的 Compiler\，再设 AHK_ROOT 调用。
+          $ahkRoot = Split-Path $base -Parent
+          $compilerDir = Join-Path $ahkRoot "Compiler"
+          New-Item -ItemType Directory -Force -Path $compilerDir | Out-Null
+          Copy-Item -LiteralPath $ahk2exe -Destination (Join-Path $compilerDir "Ahk2Exe.exe") -Force
+          $env:AHK_ROOT = $ahkRoot
+          $env:GITHUB_ACTIONS = "true"
+          Write-Host "调用 build.bat（AHK_ROOT=$ahkRoot）..."
+          & cmd /c build.bat
+          if ($LASTEXITCODE -ne 0) { Write-Host "build.bat 失败，退出码=$LASTEXITCODE"; exit $LASTEXITCODE }
+          $out = "output\zestcaps_v${{ steps.version.outputs.version }}.exe"
           if (-not (Test-Path $out)) { Write-Host "编译未生成产物: $out"; exit 1 }
           Write-Host "编译完成: $out"
 
