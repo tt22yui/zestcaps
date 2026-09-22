@@ -1,10 +1,10 @@
 name: Build
 
 on:
-  workflow_dispatch:            # 手动触发（主要方式）
+  workflow_dispatch:            # 手动触发：仅构建并上传产物，不创建 Release
   push:
     tags:
-      - 'v*'                    # 推送 v* 标签时自动发布正式版
+      - 'v*'                    # 推送 v* 标签时自动发布正式版（Release 步骤仅在 tag 时执行）
 
 # 同一 ref 的构建互斥：避免「手动触发」与「打标签」同时跑，两个 Release 互相覆盖
 concurrency:
@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: 下载官方 Zip 解释器（供单测与编译使用）
         shell: pwsh
@@ -31,6 +31,11 @@ jobs:
           $url = "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.26/AutoHotkey_2.0.26.zip"
           $zip = Join-Path $env:RUNNER_TEMP "ahk.zip"
           Invoke-WebRequest -Uri $url -OutFile $zip
+          # 校验下载包 SHA256（官方 Release 资产不可变，哈希固定），防止匿名下载被替换/损坏
+          $expected = "43522aa3122a57784ac5db30abf85c2244475c36acd7796e2c993355f9e926ae"
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
+          if ($actual -ne $expected) { throw "AutoHotkey ZIP 校验失败：期望 $expected，实际 $actual" }
+          Write-Host "AutoHotkey ZIP SHA256 校验通过"
           Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "ahk") -Force
           $baseExe = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" | Select-Object -First 1
           if (-not $baseExe) { throw "官方 Zip 未包含 AutoHotkey64.exe" }
@@ -139,7 +144,7 @@ jobs:
 
       - name: 上传单测报告（无论成败）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unit-test-reports
           path: test/**/junit_unit_*.xml
@@ -243,28 +248,23 @@ jobs:
               if (-not $ahk2exe -and (Test-Path -LiteralPath $c)) { $ahk2exe = $c }
             }
           }
-          # ④ 从官方 Release 下载 Ahk2Exe（安装版 UX\install-ahk2exe.ahk 用的就是这条路：
-          #    查询 api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest，取首个 .zip 资产，
-          #    解压后放入 Compiler\）。此处照做：API 取资产 → 失败则退回 latest 直链 → 解压后递归找 exe
+          # ④ 从官方 Release 下载 Ahk2Exe（安装版 UX\install-ahk2exe.ahk 用的就是这条路）。
+          #    固定到具体版本并校验 SHA256：匿名下载 latest 无校验存在供应链风险。
           if (-not $ahk2exe) {
             $ProgressPreference = 'SilentlyContinue'
-            $zipUrl = ""
-            try {
-              $api = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -Headers @{ "User-Agent" = "zestcaps-ci" }
-              $asset = $api.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
-              if ($asset) { $zipUrl = $asset.browser_download_url }
-            } catch {
-              Write-Host "查询 Ahk2Exe Release 失败（将退回直链）：$($_.Exception.Message)"
-            }
-            if (-not $zipUrl) { $zipUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/latest/download/Ahk2Exe.zip" }
+            $zipUrl = "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02a2/Ahk2Exe1.1.37.02a2.zip"
+            $zipSha = "c29b8c3a5124850d79fc9e66e2ca79677c377d7f31631ad3022ba159c5d9e3be"
             Write-Host "从官方 Release 获取 Ahk2Exe: $zipUrl"
             $zipPath = Join-Path $env:RUNNER_TEMP "Ahk2Exe.zip"
             $dst = Join-Path $env:RUNNER_TEMP "ahk2exe"
             try {
               Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+              $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLower()
+              if ($actual -ne $zipSha) { throw "Ahk2Exe ZIP 校验失败：期望 $zipSha，实际 $actual" }
+              Write-Host "Ahk2Exe ZIP SHA256 校验通过"
               Expand-Archive -Path $zipPath -DestinationPath $dst -Force
             } catch {
-              Write-Host "Ahk2Exe 下载/解压失败：$($_.Exception.Message)"
+              Write-Host "Ahk2Exe 下载/校验/解压失败：$($_.Exception.Message)"
             }
             $tried += "递归搜索 $dst\**\Ahk2Exe.exe"
             $f = Get-ChildItem -Path $dst -Recurse -Filter "Ahk2Exe.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -308,8 +308,17 @@ jobs:
           "$hash  $([System.IO.Path]::GetFileName($exe))" | Out-File -FilePath $shaFile -Encoding ascii
           Write-Host "已生成: $shaFile"
 
-      - name: 发布到 GitHub Releases
-        uses: softprops/action-gh-release@v3
+      - name: 上传构建产物（供手动触发时下载）
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zestcaps-exe
+          path: output/zestcaps_v${{ steps.version.outputs.version }}.exe
+          if-no-files-found: warn
+
+      - name: 发布到 GitHub Releases（仅打标签时）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ZestCaps v${{ steps.version.outputs.version }}
