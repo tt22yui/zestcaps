@@ -2,8 +2,10 @@
 ; 工具栏通用 UI 组件（选区动作工具栏 / 编辑窗工具栏共用）
 ;   - 颜色色块：外框 + 内块，亮度自适应文字色，选中态 ✔ + 外框高亮
 ;   - 扁平文字按钮：Text 控件模拟，统一悬停高亮 / 选中态（窗口级鼠标消息统一处理）
-; 依赖：Config.ahk（EDIT_TB_* / EDIT_COLORS 配色常量）
+; 依赖：Config.ahk（EDIT_TB_* / EDIT_COLORS 配色常量）、Monitor.ahk（MonitorIndexAt）
 ; ==================================================================
+
+#Include "Monitor.ahk"
 
 ; ------------------------------------------------------------------
 ; 工具栏 DPI 缩放
@@ -429,16 +431,8 @@ ToolbarPlaceUnder(rows, anchor) {
     rowGap := 2 ; 行与行之间的间距
     centerX := (anchor.l + anchor.r) // 2
     centerY := (anchor.t + anchor.b) // 2
-    ; 锚点中心所在显示器的工作区（本地命中，不依赖 Overlay.ahk 的 MonitorIndexAt，保持组件自足）
-    idx := 1
-    Loop MonitorGetCount() {
-        MonitorGet(A_Index, &ml, &mt, &mr, &mb)
-        if (centerX >= ml && centerX < mr && centerY >= mt && centerY < mb) {
-            idx := A_Index
-            break
-        }
-    }
-    MonitorGetWorkArea(idx, &ml, &mt, &mr, &mb)
+    ; 锚点中心所在显示器的工作区（命中逻辑走共享的 MonitorIndexAt）
+    MonitorGetWorkArea(MonitorIndexAt(centerX, centerY), &ml, &mt, &mr, &mb)
     ; 整体高度 = 各行之和高 + 行间距
     totalH := 0
     for r in rows

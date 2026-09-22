@@ -6,19 +6,12 @@
 ; 依赖：Config.ahk（MASK_COLOR / MASK_TRANSPARENCY / EDIT_BORDER_COLOR / EDIT_BORDER_WIDTH）
 ; ==================================================================
 
+; 显示器命中（MonitorIndexAt）抽到 Monitor.ahk 共享（P1-4 去重）
+#Include "Monitor.ahk"
+
 ; ------------------------------------------------------------------
 ; 工具函数
 ; ------------------------------------------------------------------
-
-; 返回坐标点所在的显示器编号
-MonitorIndexAt(x, y) {
-    Loop MonitorGetCount() {
-        MonitorGet(A_Index, &ml, &mt, &mr, &mb)
-        if (x >= ml && x < mr && y >= mt && y < mb)
-            return A_Index
-    }
-    return 1
-}
 
 ; 所有显示器的并集边界（覆盖全部屏幕，支持负坐标的左侧/上方显示器）
 GetAllMonitorsBounds(&mx, &my, &mw, &mh) {
