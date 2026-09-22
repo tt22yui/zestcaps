@@ -306,6 +306,20 @@ EditorHideScrollButton() {
 }
 
 ; ------------------------------------------------------------------
+; 选区工具栏被销毁时的 Editor 侧清理（由选区 _DestroyOverlays 回调调用）
+; 目的：选区块不再直接写 Editor 的全局引用（去除「下层模块清理上层内部状态」的反向依赖），
+;       改由 Editor 自己清理。仅当被销毁的正是 Editor 当前 row1 时清引用与滚动按钮，
+;       否则不动（避免误清仍在使用的状态）。
+; ------------------------------------------------------------------
+EditorOnToolbarDestroyed(toolbar) {
+    global EditorToolbar, EditorScrollButton
+    if (toolbar && toolbar = EditorToolbar) {
+        EditorToolbar := 0       ; 防残留非零引用误判下一会话 promote
+        EditorScrollButton := 0  ; 滚动截图按钮随 row1 一起销毁，清引用防悬空
+    }
+}
+
+; ------------------------------------------------------------------
 ; 扁平按钮悬停/选中态：统一由 Common\ToolbarUI.ahk 的 ToolbarHoverState 处理
 ; （创建按钮用 tb.HoverState.Add，刷新选中态用 tb.HoverState.Refresh）
 ; ------------------------------------------------------------------
