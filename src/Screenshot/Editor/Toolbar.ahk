@@ -320,6 +320,47 @@ EditorOnToolbarDestroyed(toolbar) {
 }
 
 ; ------------------------------------------------------------------
+; 选区 ↔ 编辑 跨阶段工具栏状态访问入口（P1-1）
+; 选区块不再直接读写这些 Editor 全局，统一经本组函数，便于集中维护与检索耦合点。
+; ------------------------------------------------------------------
+; 新会话开始前重置工具栏单一真源与结果通道（防止上一会话的选中态/阶段残留误判）
+EditorResetToolbarForSelection() {
+    global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
+    EditorTool := ""
+    EditorColorIdx := 1
+    ToolbarPhase := "selection"
+    ScreenToolbarResult := ""
+}
+
+; 标记工具栏处于选区阶段
+EditorSetToolbarPhaseSelection() {
+    global ToolbarPhase
+    ToolbarPhase := "selection"
+}
+
+; 写选区阶段的动作结果通道（"editor"/save/pin/copy/scroll/空）
+EditorSetToolbarResult(v) {
+    global ScreenToolbarResult
+    ScreenToolbarResult := v
+}
+
+; 读选区阶段的动作结果通道（选区循环轮询用）
+EditorGetToolbarResult() {
+    global ScreenToolbarResult
+    return ScreenToolbarResult
+}
+
+; 读当前工具名 / 颜色索引（选区工具栏点选后，选区块据此预选进入编辑；P1-1）
+EditorGetTool() {
+    global EditorTool
+    return EditorTool
+}
+EditorGetColorIdx() {
+    global EditorColorIdx
+    return EditorColorIdx
+}
+
+; ------------------------------------------------------------------
 ; 扁平按钮悬停/选中态：统一由 Common\ToolbarUI.ahk 的 ToolbarHoverState 处理
 ; （创建按钮用 tb.HoverState.Add，刷新选中态用 tb.HoverState.Refresh）
 ; ------------------------------------------------------------------

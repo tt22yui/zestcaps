@@ -25,7 +25,6 @@ _MoveSelectLayers(borders, selGui, region, selLast) {
 ; ------------------------------------------------------------------
 SelectRegion(region, &initialTool := "", &initialColor := 0) {
     global SCREENSHOT_TIMEOUT_MS
-    global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
 
     CoordMode "Mouse", "Screen"
 
@@ -34,12 +33,9 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
 
     ; 重置工具栏单一真源与结果通道：防止上一会话的工具栏选中态/阶段残留误判
     ; （EditorTool 一空 → 编辑无预选工具进入，与「仅点窗口」快速截图行为一致）
-    EditorTool := ""
-    EditorColorIdx := 1
-    ToolbarPhase := "selection"
-    ScreenToolbarResult := ""
+    EditorResetToolbarForSelection()
 
-    ; 可变状态对象（供热键与定时器闭包共享；动作结果走全局 ScreenToolbarResult）
+    ; 可变状态对象（供热键与定时器闭包共享；动作结果走工具栏结果通道，见 EditorGetToolbarResult）
     state := { canceled: false, confirmed: false, isDragging: false, dragStartX: 0, dragStartY: 0, hoverX: 0, hoverY: 0
         , region: region }
 
@@ -63,8 +59,8 @@ SelectRegion(region, &initialTool := "", &initialColor := 0) {
 
         ; 选区已确认：蒙版/边框保留不销毁，由后续流程接管（编辑器就地升级 / 钉屏）
         _SelectionConfirm(state, ovl, toolbar)
-        initialTool := EditorTool      ; 点击标注工具时的预选工具（编辑器初始工具，单一真源）
-        initialColor := EditorColorIdx ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
+        initialTool := EditorGetTool()       ; 点击标注工具时的预选工具（编辑器初始工具，单一真源）
+        initialColor := EditorGetColorIdx()  ; 点击标注工具时自动选中的颜色索引（编辑器初始颜色）
         return action
     } finally {
         ; 取消/异常路径立即清理覆盖层；成功路径保留（延迟清理），避免整屏明暗跳变
@@ -217,7 +213,7 @@ _SelectionWaitDrag(state, region, ovl, deadline) {
 ; 选区微调循环：处理工具栏动作与「保存」子流程（取消保存则回到微调）
 ; 返回工具栏动作 "editor"|"copy"|"save"|"pin" 或 "cancel"
 _SelectionAdjustLoop(state, region, ovl, deadline, toolbar) {
-    global SCREENSHOT_TIMEOUT_MS, ScreenshotEscCancel, ScreenshotSaveFilename, ScreenToolbarResult
+    global SCREENSHOT_TIMEOUT_MS, ScreenshotEscCancel, ScreenshotSaveFilename
     while true {
         action := SelectRegionAdjust(state, region, ovl.borders, ovl.selGui, ovl.mask, deadline, toolbar)
         if action = "cancel"
@@ -237,7 +233,7 @@ _SelectionAdjustLoop(state, region, ovl, deadline, toolbar) {
         if ScreenshotSaveFilename != ""
             return "save"  ; 保存成功，由外层落盘
         ; 取消保存：重置动作与取消标志并顺延超时截止点，继续选区微调（可再调整/换动作/再保存）
-        ScreenToolbarResult := ""
+        EditorSetToolbarResult("")
         state.canceled := false
         deadline := A_TickCount + SCREENSHOT_TIMEOUT_MS
     }
@@ -353,15 +349,15 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
     OnMessage(0x20, _SelectionCrossCursor, 0)  ; 退出十字光标阶段，改由 AdjustSetCursor 按命中区切换
     OnMessage(0x20, AdjustSetCursor)  ; WM_SETCURSOR：悬停选区边角/内部时切换方向光标
     try {
-        ; 等待工具栏动作或取消（动作由工具栏按钮回调写入全局 ScreenToolbarResult）
-        while !state.canceled && ScreenToolbarResult = "" {
+        ; 等待工具栏动作或取消（动作由工具栏按钮回调写入结果通道）
+        while !state.canceled && EditorGetToolbarResult() = "" {
             if A_TickCount > deadline {
                 state.canceled := true  ; 超时未确认，自动取消
                 break
             }
             Sleep 10
         }
-        return state.canceled ? "cancel" : ScreenToolbarResult
+        return state.canceled ? "cancel" : EditorGetToolbarResult()
     } finally {
         OnMessage(0x201, AdjustLButtonDown, 0)
         OnMessage(0x200, AdjustMouseMove, 0)
@@ -379,7 +375,7 @@ SelectRegionAdjust(state, region, borders, selGui, maskOv, deadline, toolbar) {
 ; 此处只需命中选区内（hit="move"）即触发「复制并关闭截图」（与工具栏「📋 复制」按钮一致）；
 ; 单击仍由 0x201 走平移（双击第一次按下短暂启动平移、松开即结束，鼠标位移很小，选区不位移）
 AdjustLButtonDblClk(wParam, lParam, msg, hwnd) {
-    global ScreenshotAdjustCtx, ScreenToolbarResult
+    global ScreenshotAdjustCtx
     ctx := ScreenshotAdjustCtx
     if !ctx || ctx.drag || ctx.state.canceled || ctx.state.confirmed
         return
@@ -390,13 +386,13 @@ AdjustLButtonDblClk(wParam, lParam, msg, hwnd) {
     ctx.region.GetRegionRect(&l, &t, &w, &h)
     hit := _AdjustHitTest(mx, my, l, t, l + w, t + h)
     if (hit = "move")
-        ScreenToolbarResult := "copy"
+        EditorSetToolbarResult("copy")
 }
 
 ; 左键按下：判定点击命中区（选区内部=平移 / 外侧边框带=改大小），并启动对应拖动；
 ; 选区外空白点击不响应（动作统一由工具栏提供）
 AdjustLButtonDown(wParam, lParam, msg, hwnd) {
-    global ScreenshotAdjustCtx, ScreenToolbarResult
+    global ScreenshotAdjustCtx
     ctx := ScreenshotAdjustCtx
     if !ctx || ctx.drag || ctx.state.canceled || ctx.state.confirmed
         return
@@ -414,7 +410,7 @@ AdjustLButtonDown(wParam, lParam, msg, hwnd) {
     ; 双击选区内部 → 直接复制到剪贴板并关闭截图（与工具栏「📋 复制」按钮一致），不进入平移；
     ; 单击仍平移（双击的第一次按下会短暂启动平移、松开即结束，鼠标位移很小，选区不位移）
     if (hit = "move" && _IsSelectionDoubleClick(mx, my)) {
-        ScreenToolbarResult := "copy"
+        EditorSetToolbarResult("copy")
         return
     }
     mode := SubStr(hit, 1, 4)                  ; "move" 或 "resi"（resize）
@@ -629,16 +625,15 @@ _IsSelectionDoubleClick(mx, my, reset := false) {
 
 ; ------------------------------------------------------------------
 ; 选区动作工具栏：标注工具 + 保存 / 钉屏 / 复制（与编辑工具栏共用同一行 row1，跨阶段持久）
-; 拖出矩形后展示在选区下方并跟随选区；点击动作写入全局 ScreenToolbarResult
+; 拖出矩形后展示在选区下方并跟随选区；点击动作写入工具栏结果通道（EditorSetToolbarResult）
 ; ------------------------------------------------------------------
 
 ; 创建选区动作工具栏并定位到选区下方（复用编辑 row1 的构建 ScreenToolbarCreateRow1；选中态与
-; 点击行为由全局 ToolbarPhase="selection" 驱动：工具 → 选工具 + 自动选第 1 色 + 进入编辑）
+; 点击行为由 ToolbarPhase="selection" 驱动：工具 → 选工具 + 自动选第 1 色 + 进入编辑）
 ; 保存/钉屏/复制 直接输出后关闭截图（复制最右）；退出由 Esc / 右键承担
 SelToolbarCreate(state, region) {
-    global ToolbarPhase
     tb := ScreenToolbarCreateRow1(0)  ; 幂等构建 row1（选区 DPI：内部临时 Show 读鼠标所在屏）
-    ToolbarPhase := "selection"
+    EditorSetToolbarPhaseSelection()
     SelToolbarsReposition(tb, region)
     tb.Show("NA")  ; 已在最终位置，直接显示，避免从默认位置跳变闪烁
     ToolbarFadeIn(tb.Hwnd)  ; 淡入出现（约 130ms），避免工具栏"硬出现"

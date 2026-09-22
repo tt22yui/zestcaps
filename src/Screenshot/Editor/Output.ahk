@@ -41,7 +41,7 @@ EditorRestoreOverlaysForDialog() {
 }
 
 EditorSave(*) {
-    global EditorResult, EscNeed
+    global EditorResult
     ; 弹系统保存对话框前临时隐藏置顶覆盖层，避免对话框被蒙版遮挡/拦截点击
     EditorHideOverlaysForDialog()
     ; 保存框期间临时关闭 Esc 热键：否则在对话框里按 Esc 取消保存时，Esc 会被统一分发
@@ -59,7 +59,7 @@ EditorSave(*) {
         }
     } finally {
         ; 按引用计数恢复 Esc（本次只是临时关闭，不改变计数）
-        if (EscNeed > 0)
+        if EscNeeded()
             Hotkey "Esc", EditorEscDispatch, "On"
         ; 仅取消保存时恢复覆盖层（保持编辑状态继续编辑）；
         ; 保存成功时覆盖层保持隐藏，避免「恢复→随即销毁」的闪回与停留

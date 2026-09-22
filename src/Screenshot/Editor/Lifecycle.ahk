@@ -192,8 +192,7 @@ EditorPinInPlace() {
 ; 每步独立 try 保护：单项失败不阻断其余资源释放（避免异常被全局错误钩子吞掉后静默泄漏）；
 ; 返回 0 允许 Gui 默认关闭流程继续（窗口销毁）
 PinCleanupSession(hwnd, bgBmp, bgBaseBmp, anns, pend) {
-    global PinSessions
-    s := PinSessions.Get(hwnd, 0)
+    s := PinGetSession(hwnd)
     if s {
         BorderStripsDestroy(s.borders)  ; 释放钉屏会话持有的覆盖层边框
         try Gdip_DisposeImage(s.work)   ; 释放显示工作位图（编辑窗转移画面）

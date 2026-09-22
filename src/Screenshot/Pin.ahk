@@ -69,6 +69,19 @@ EscUnregister() {
         Hotkey "Esc", "Off"
 }
 
+; Esc 是否仍被需要（跨模块只读入口，避免其它模块直接读 EscNeed；P1-1）
+EscNeeded() {
+    global EscNeed
+    return EscNeed > 0
+}
+
+; 读取钉屏会话（跨模块访问入口，避免其它模块直接摸 PinSessions；P1-1）
+; 返回会话对象；不存在返回 0
+PinGetSession(hwnd) {
+    global PinSessions
+    return PinSessions.Get(hwnd, 0)
+}
+
 ; 统一 Esc 分发（编辑 / 截图选区 / 钉屏 共享热键，按当前状态分流）：
 ;   1) 截图选区阶段：取消选区
 ;   2) 编辑窗存在：取消编辑
