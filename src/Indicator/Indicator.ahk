@@ -9,6 +9,9 @@ global IND_TEXT_CN, IND_COLOR_CN, IND_BG_CN
 global IND_TEXT_EN, IND_COLOR_EN, IND_BG_EN
 global IND_TEXT_A, IND_COLOR_A, IND_BG_A
 
+; 纯逻辑（标签/配色选择 + Map 淘汰）抽到 Visual.ahk，便于无副作用单测
+#Include "Visual.ahk"
+
 ; 全局设置：MouseGetPos 使用屏幕坐标（仅需设置一次）
 CoordMode "Mouse", "Screen"
 
@@ -121,22 +124,16 @@ _UpdateIndicator() {
 
     IME_isChinese := chinese
     IME_WindowStates[activeKey] := chinese
-    ; 防止 Map 无限增长：超过 200 条时删除最早记录的进程（跟踪状态与锁存同步裁剪）
+    ; 防止 Map 无限增长：超过 200 条时淘汰最早记录的进程（跟踪状态与锁存同步裁剪）
     if IME_WindowStates.Count > 200 {
-        enum := IME_WindowStates.__Enum()
-        enum(&oldest)
-        IME_WindowStates.Delete(oldest)
-        IME_SawChinese.Delete(oldest)
+        oldest := IndicatorEvictOverflow(IME_WindowStates, 200)
+        if IME_SawChinese.Has(oldest)   ; 缺失键 Delete 会抛错，先 Has
+            IME_SawChinese.Delete(oldest)
     }
 
-    ; 1. 当前状态
-    if GetKeyState("CapsLock", "T") {
-        label := IND_TEXT_A, bg := IND_BG_A, txt := IND_COLOR_A
-    } else if IME_isChinese {
-        label := IND_TEXT_CN, bg := IND_BG_CN, txt := IND_COLOR_CN
-    } else {
-        label := IND_TEXT_EN, bg := IND_BG_EN, txt := IND_COLOR_EN
-    }
+    ; 1. 当前状态（纯函数选标签/配色，便于单测）
+    vis := IndicatorVisual(GetKeyState("CapsLock", "T"), IME_isChinese)
+    label := vis.label, bg := vis.bg, txt := vis.txt
 
     ; 2. GUI 样式只有变化时才重绘
     if (label != prevLabel) {

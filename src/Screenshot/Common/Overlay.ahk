@@ -113,21 +113,26 @@ _MaskFadeTick(ov, fade) {
     try WinSetTransparent a, ov.gui
 }
 
+; 纯几何（便于单测）：全屏减矩形的 4 条补集矩形（窗口客户区坐标，[l,t,r,b]×4）
+; 顺序：上带 / 下带 / 左带 / 右带（与被挖洞矩形互补，并集即「全屏减洞」）
+MaskHoleBands(x, y, w, h, mx, my, mw, mh) {
+    rx := x - mx, ry := y - my  ; 矩形在窗口客户区坐标中的位置
+    return [
+        [0, 0, mw, Max(0, ry)],
+        [0, ry + h, mw, mh],
+        [0, ry, Max(0, rx), ry + h],
+        [rx + w, ry, mw, ry + h]
+    ]
+}
+
 ; 构建「全屏减矩形」挖洞 region（4 矩形并集），返回 GDI region 句柄
 ; 注意：句柄传给 SetWindowRgn 后归窗口所有，调用者不得再 DeleteObject
 MaskHoleRegion(x, y, w, h, mx, my, mw, mh) {
-    rx := x - mx, ry := y - my  ; 矩形在窗口客户区坐标中的位置
+    bands := MaskHoleBands(x, y, w, h, mx, my, mw, mh)
     hRgn := DllCall("CreateRectRgn", "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UPtr")
-    loop 4 {
+    for b in bands {
         hTmp := DllCall("CreateRectRgn", "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UPtr")
-        if (A_Index = 1)
-            DllCall("SetRectRgn", "UPtr", hTmp, "Int", 0, "Int", 0, "Int", mw, "Int", Max(0, ry))
-        else if (A_Index = 2)
-            DllCall("SetRectRgn", "UPtr", hTmp, "Int", 0, "Int", ry + h, "Int", mw, "Int", mh)
-        else if (A_Index = 3)
-            DllCall("SetRectRgn", "UPtr", hTmp, "Int", 0, "Int", ry, "Int", Max(0, rx), "Int", ry + h)
-        else
-            DllCall("SetRectRgn", "UPtr", hTmp, "Int", rx + w, "Int", ry, "Int", mw, "Int", ry + h)
+        DllCall("SetRectRgn", "UPtr", hTmp, "Int", b[1], "Int", b[2], "Int", b[3], "Int", b[4])
         DllCall("CombineRgn", "UPtr", hRgn, "UPtr", hRgn, "UPtr", hTmp, "Int", 2)  ; RGN_OR
         DllCall("DeleteObject", "UPtr", hTmp)
     }

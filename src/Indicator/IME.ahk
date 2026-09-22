@@ -10,16 +10,20 @@ IME_WindowStates := Map()
 ; 此时 conv=0 是真实英文；为 false(且无 IMM 上下文)表示 TSF-only 窗口(WebView2/Tauri)，须用跟踪状态。
 IME_SawChinese := Map()
 
+; 纯函数（便于单测）：语言 ID 是否为中文布局
+; 0x0804=zh-CN  0x0404=zh-TW  0x0C04=zh-HK  0x1004=zh-SG
+IsChineseLayout(langId) {
+    return (langId = 0x0804 || langId = 0x0404 || langId = 0x0C04 || langId = 0x1004)
+}
+
 ; 对新窗口做最佳推测：布局不是中文 → 肯定是英文
 ; 布局是中文（微信输入法等）→ 无法确定，返回当前值
 DetectIMEByLayout(hwnd) {
     threadId := DllCall("user32\GetWindowThreadProcessId", "ptr", hwnd, "ptr", 0, "uint")
     hkl := DllCall("user32\GetKeyboardLayout", "uint", threadId, "ptr")
     langId := hkl & 0xFFFF
-    ; 0x0804=zh-CN  0x0404=zh-TW  0x0C04=zh-HK  0x1004=zh-SG
-    if (langId != 0x0804 && langId != 0x0404 && langId != 0x0C04 && langId != 0x1004)
-        return false    ; 非中文布局 → 英文
-    return "unknown"    ; 中文布局 → 不确定
+    ; 非中文布局 → 英文；中文布局 → 不确定
+    return IsChineseLayout(langId) ? "unknown" : false
 }
 
 ; 顶层窗口是否持有有效 IMM 输入上下文（ImmGetContext 非空）

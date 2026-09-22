@@ -21,6 +21,10 @@ tests := [
     "Settings\test_unit_settings.ahk",
     "Screenshot\test_unit_dblclick.ahk",
     "Screenshot\test_unit_scroll.ahk",
+    "Screenshot\test_unit_overlay.ahk",
+    "Indicator\test_unit_ime.ahk",
+    "Indicator\test_unit_indicator.ahk",
+    "Splash\test_unit_splash.ahk",
 ]
 
 ; 向 stdout 写入（与 YunitStdOut 同策略：无 stdout 管道/重定向时静默跳过）
