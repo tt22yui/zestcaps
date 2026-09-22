@@ -97,6 +97,46 @@ jobs:
             exit $testExit
           }
 
+      - name: 运行期加载检查（Load/冒烟，headless，失败则中止）
+        shell: pwsh
+        run: |
+          # 执行各模块顶层代码，抓 /validate 抓不到的运行期加载错误（Gdip_Startup、托盘菜单初始化、热键注册等）
+          $ahk = $env:AHK_BASE
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            $found = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ahk = $found.FullName }
+          }
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) { Write-Host "未找到 AutoHotkey64.exe"; exit 1 }
+          $loadTests = @("test\Load\test_main_load.ahk", "test\Load\test_updater_load.ahk", "test\Load\test_compile_load.ahk")
+          $fail = 0
+          foreach ($t in $loadTests) {
+            $log = Join-Path $env:RUNNER_TEMP ("load_" + [IO.Path]::GetFileNameWithoutExtension($t) + ".log")
+            $p = Start-Process -FilePath $ahk -ArgumentList @("/ErrorStdOut", $t) -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+            Write-Host "==== $t (exit=$($p.ExitCode)) ===="
+            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } }
+            if (Test-Path "$log.err") { Get-Content "$log.err" | ForEach-Object { Write-Host $_ } }
+            if ($p.ExitCode -ne 0) { $fail++ }
+          }
+          if ($fail -ne 0) { Write-Error "运行期加载检查失败 $fail 项"; exit 1 }
+          Write-Host "运行期加载检查通过"
+
+      - name: GUI 回归测试（非阻塞；CI 桌面环境不稳定，结果仅供查看）
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # 窗口类集成测试需要可交互桌面，CI runner 上可能不稳定，故非阻塞（失败会在本步标红，但不影响发布）
+          $ahk = $env:AHK_BASE
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) {
+            $found = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ahk") -Recurse -Filter "AutoHotkey64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ahk = $found.FullName }
+          }
+          if (-not $ahk -or -not (Test-Path -LiteralPath $ahk)) { Write-Host "未找到 AutoHotkey64.exe"; exit 1 }
+          $log = Join-Path $env:RUNNER_TEMP "gui_tests.log"
+          $p = Start-Process -FilePath $ahk -ArgumentList @("test\run_gui_tests.ahk") -Wait -PassThru -RedirectStandardOutput $log
+          if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } }
+          Write-Host "GUI 测试退出码=$($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Write-Error "GUI 回归测试未全部通过，退出码=$($p.ExitCode)"; exit $p.ExitCode }
+
       - name: 上传单测报告（无论成败）
         if: always()
         uses: actions/upload-artifact@v4
