@@ -258,7 +258,7 @@ _SelectionConfirm(state, ovl, toolbar) {
 ; keepToolbar=true：选区工具栏交给编辑器接管（跨阶段持久，不销毁、不清 ToolbarHoverActive）
 _DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
     global ScreenshotMaskHwnds, ScreenshotSelHwnd, ScreenshotBorderHwnds, ScreenshotEscCancel
-    global ToolbarHoverActive, EditorToolbar, EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
+    global ToolbarHoverActive, EditorToolbar, EditorScrollButton
     try Hotkey "*RButton", "Off"
     OnMessage(0x20, _SelectionCrossCursor, 0)  ; 注销十字光标回调（未进入微调即取消/快速截图路径的兜底）
     if ScreenshotEscCancel {
@@ -278,8 +278,6 @@ _DestroyOverlays(maskOv, borders, selGui, toolbar := 0, keepToolbar := false) {
         if toolbar = EditorToolbar
             EditorToolbar := 0  ; 选区路径销毁 row1 时同步清全局，防残留非零引用误判下一会话 promote
         EditorScrollButton := 0  ; 滚动截图按钮随 row1 一起销毁，清引用防悬空
-        EditorScrollExtraW := 0
-        EditorScrollAfterCtrls := []
     }
     ScreenshotMaskHwnds := []
     ScreenshotSelHwnd := 0

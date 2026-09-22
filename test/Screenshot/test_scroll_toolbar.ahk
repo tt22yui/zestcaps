@@ -1,7 +1,8 @@
 ; 验证「滚动截图」入口在选区工具栏的接入与编辑阶段移除：
-;   - 选区建 row1 时附加滚动截图按钮（EditorScrollButton 非 0，EditorScrollExtraW > 0）
+;   - 选区建 row1 时附加滚动截图按钮（EditorScrollButton 非 0）
 ;   - ToolbarScrollClick 写结果通道 "scroll"
-;   - EditorHideScrollButton 隐藏按钮并收缩工具栏宽度、清引用
+;   - EditorHideScrollButton 仅隐藏按钮并**保留槽位**：工具栏宽度不变、输出按钮不左移，
+;     并把该按钮从悬停命中/提示列表移除（避免空白槽位误触发悬停/tooltip）
 ;   - _DestroyOverlays 销毁 row1 时同步清按钮引用
 ;
 ; 按 Main.ahk 真实加载顺序加载（Config → DebugLog → Screenshot 链式 Include）。
@@ -39,7 +40,7 @@ Check(cond, label) {
 }
 
 _Cleanup() {
-    global EditorToolbar, EditorColorToolbar, ToolbarHoverActive, EditorScrollButton, EditorScrollAfterCtrls
+    global EditorToolbar, EditorColorToolbar, ToolbarHoverActive, EditorScrollButton
     if IsObject(EditorToolbar) && IsObject(EditorToolbar.HoverState)
         try EditorToolbar.HoverState.ClearTransient()
     if IsObject(EditorToolbar)
@@ -52,7 +53,6 @@ _Cleanup() {
     EditorColorToolbar := 0
     ToolbarHoverActive := 0
     EditorScrollButton := 0
-    EditorScrollAfterCtrls := []
 }
 
 global EditorTool, EditorColorIdx, ToolbarPhase, ScreenToolbarResult
@@ -65,26 +65,34 @@ ScreenToolbarResult := ""
 t1 := ScreenToolbarCreateRow1(0)
 Check(IsObject(t1) && t1 = EditorToolbar, "选区建 row1 成功")
 Check(IsObject(EditorScrollButton), "选区 row1 含滚动截图按钮")
-Check(EditorScrollExtraW > 0, "滚动截图按钮额外宽度已记录 (" EditorScrollExtraW ")")
-Check(IsObject(EditorScrollAfterCtrls) && EditorScrollAfterCtrls.Length = 3, "记录按钮后的输出控件（保存/钉屏/复制）")
-w0 := EditorToolbarW
-deltaW := EditorScrollExtraW
-saveCtrl := EditorScrollAfterCtrls[1]
+hs := t1.HoverState
+nBtns0 := hs.btns.Length
+Check(nBtns0 = 10, "row1 按钮数=10（6 工具 + 滚动截图 + 保存/钉屏/复制），实际 " nBtns0)
+; 通过 tooltip 文本定位「保存」按钮（不再有 EditorScrollAfterCtrls 可查）
+saveCtrl := 0
+for c, tip in hs.tips
+    if (tip = "保存")
+        saveCtrl := c
+Check(IsObject(saveCtrl), "找到「保存」按钮")
 saveCtrl.GetPos(&saveX0, )
+w0 := EditorToolbarW
 
 ; ---- 点击滚动截图按钮：写结果通道 ----
 ToolbarScrollClick()
 Check(ScreenToolbarResult = "scroll", "点击滚动截图写 Result=scroll")
 
-; ---- 编辑阶段移除：隐藏按钮、后续控件左移、收缩宽度 ----
+; ---- 编辑阶段隐藏：仅隐藏、保留槽位（宽度不变、输出按钮不左移、退出悬停命中/提示）----
 EditorHideScrollButton()
 Check(EditorScrollButton = 0, "隐藏后清空按钮引用")
-Check(EditorScrollAfterCtrls.Length = 0, "隐藏后清空后续控件列表")
-Check(EditorToolbarW < w0, "隐藏后工具栏宽度收缩 (" w0 " → " EditorToolbarW ")")
-Check(EditorToolbarW = w0 - deltaW, "收缩量等于按钮额外宽度 (" deltaW ")")
-Check(EditorToolbarW > 0, "收缩后宽度仍为正")
+Check(EditorToolbarW = w0, "隐藏后工具栏宽度不变（保留槽位，避免重新居中）(" w0 " → " EditorToolbarW ")")
+Check(hs.btns.Length = nBtns0 - 1, "滚动按钮已从悬停命中列表移除（" nBtns0 " → " hs.btns.Length "）")
+hasScrollTip := false
+for c, tip in hs.tips
+    if (tip = "滚动截图")
+        hasScrollTip := true
+Check(!hasScrollTip, "滚动截图按钮已从悬停提示列表移除（空白槽位不再误弹 tooltip）")
 saveCtrl.GetPos(&saveX1, )
-Check(saveX1 = saveX0 - deltaW, "后续输出按钮整体左移 (" saveX0 " → " saveX1 ")")
+Check(saveX1 = saveX0, "输出按钮位置不变（不左移）(" saveX0 " → " saveX1 ")")
 
 ; ---- 销毁 row1：按钮引用随之清空（幂等兜底）----
 ScreenToolbarResult := ""

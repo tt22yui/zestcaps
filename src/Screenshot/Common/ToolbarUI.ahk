@@ -208,6 +208,29 @@ class ToolbarHoverState {
         return c
     }
 
+    ; 从悬停命中 / 提示列表移除一个已隐藏的图标按钮（如进入编辑后隐藏的「滚动截图」）。
+    ; 隐藏的控件 AHK 仍保留其窗口与坐标，若不摘除，空白槽位会继续被命中而误亮 / 误弹 tooltip。
+    ; 调用方随后需再调 CacheRects 刷新命中区域（本方法只改列表，不重算坐标）。
+    RemoveIcon(btn) {
+        if _HoverEase.Has(btn) {
+            SetTimer _HoverEase[btn].timer, 0
+            _HoverEase.Delete(btn)
+        }
+        ; 注意：AHK v2 的 Map.Delete(缺失键) 会抛「Item has no value.」，须先 Has 再删
+        if _HoverLast.Has(btn)
+            _HoverLast.Delete(btn)
+        if this.tips.Has(btn)
+            this.tips.Delete(btn)
+        if (this.ctrl = btn)
+            this.ctrl := 0
+        for i, b in this.btns {
+            if (b = btn) {
+                this.btns.RemoveAt(i)
+                break
+            }
+        }
+    }
+
     ; 工具栏 Show 后缓存按钮客户区坐标（布局定稿后才有效，悬停命中测试用）
     CacheRects() {
         this.rects := []
@@ -317,7 +340,8 @@ class ToolbarHoverState {
                 SetTimer _HoverEase[b].timer, 0
                 _HoverEase.Delete(b)
             }
-            _HoverLast.Delete(b)
+            if _HoverLast.Has(b)   ; 同上：缺失键 Delete 会抛错，须先 Has（未悬停/未应用过的按钮无此暂存）
+                _HoverLast.Delete(b)
         }
     }
 

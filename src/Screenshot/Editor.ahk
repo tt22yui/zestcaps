@@ -35,9 +35,7 @@ global EditorColorIdx := 1      ; 当前颜色索引（EDIT_COLORS；所有工�
 global EditorPenWidthIdx := 2   ; 当前线宽档位索引（EDIT_LINE_WIDTHS，默认中档；不持久化）
 global EditorToolbar := 0       ; 工具栏（第一行：工具/清除/输出按钮）Gui 对象（挂 HoverState 属性：扁平按钮悬停状态）
 global EditorToolbarW := 0, EditorToolbarH := 0  ; 工具栏尺寸缓存（创建时获取一次，拖动定位时复用，避免每帧 WinGetPos）
-global EditorScrollButton := 0  ; 选区工具栏「滚动截图」按钮控件（仅选区阶段存在；进入编辑阶段隐藏并收缩工具栏）
-global EditorScrollExtraW := 0  ; 「滚动截图」按钮占用的额外宽度（按钮宽 + 前导间距，隐藏时据此收缩工具栏）
-global EditorScrollAfterCtrls := []  ; 「滚动截图」按钮之后的控件（保存/钉屏/复制）：隐藏按钮时整体左移填补空位
+global EditorScrollButton := 0  ; 选区工具栏「滚动截图」按钮控件（仅选区阶段存在；进入编辑阶段仅隐藏、保留槽位，见 EditorHideScrollButton）
 global EditorColorToolbar := 0  ; 颜色工具栏（第二行：颜色行 + 粗细档位，始终显示，与选区颜色行同结构）
 global EditorColorToolbarW := 0, EditorColorToolbarH := 0  ; 颜色工具栏尺寸缓存
 global ToolbarPhase := ""       ; 工具栏当前阶段（"selection" 选区 / "editor" 编辑），决定按钮点击行为

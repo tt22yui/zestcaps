@@ -25,7 +25,7 @@ EditorCreateToolbar() {
 ScreenToolbarCreateRow1(dpiFrom := 0) {
     global EditorToolbar, EditorToolbarW, EditorToolbarH
     global EditorToolButtons
-    global EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
+    global EditorScrollButton
     global ToolbarHoverActive
     global EDIT_TB_BG, EDIT_TB_SEP
     if EditorToolbar
@@ -68,22 +68,18 @@ ScreenToolbarCreateRow1(dpiFrom := 0) {
     }
 
     ; 分隔线 + 输出按钮：保存 / 钉屏 / 复制（复制最右），点击行为由 ToolbarPhase 分流
-    ; 纯图标改版：系统动作类统一用 Segoe MDL2 Assets（⤓→E74E保存 图钉→E840钉屏 ⧉→E8C8复制），
+    ; 系统动作类统一用 Segoe MDL2 Assets（E74E 保存 / E840 钉屏 / E8C8 复制）
     ToolbarSeparator(tb)
     ; 滚动截图入口：仅选区阶段（dpiFrom=0）显示，位于输出组最前（保存左侧）；
-    ; 进入编辑阶段由 EditorHideScrollButton 隐藏，并把其后的输出按钮整体左移、收缩工具栏
-    if (dpiFrom = 0) {
+    ; 进入编辑阶段由 EditorHideScrollButton **仅隐藏并保留该槽位**（不左移、不收窄），
+    ; 以免工具栏变窄后重新居中而水平右移（详见 EditorHideScrollButton 注释）
+    if (dpiFrom = 0)
         EditorScrollButton := tb.HoverState.AddIcon(tb, Chr(0xEC8F), "Segoe MDL2 Assets", ToolbarScrollClick, "滚动截图")  ; ScrollUpDown
-        EditorScrollExtraW := ToolbarDpi(30) + ToolbarDpi(6)
-    } else {
+    else
         EditorScrollButton := 0
-        EditorScrollExtraW := 0
-    }
-    saveBtn := tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("save"), "保存")
-    pinBtn := tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("pin"), "钉屏")  ; 实心图钉 PinnedFill
-    copyBtn := tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("copy"), "复制")
-    ; 记录滚动按钮之后的控件（隐藏滚动按钮时需整体左移填补空位；无滚动按钮时为空）
-    EditorScrollAfterCtrls := (dpiFrom = 0) ? [saveBtn, pinBtn, copyBtn] : []
+    tb.HoverState.AddIcon(tb, Chr(0xE74E), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("save"), "保存")
+    tb.HoverState.AddIcon(tb, Chr(0xE840), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("pin"), "钉屏")  ; 实心图钉 PinnedFill
+    tb.HoverState.AddIcon(tb, Chr(0xE8C8), "Segoe MDL2 Assets", ToolbarOutputClick.Bind("copy"), "复制")
 
     ; 先 AutoSize 拿实际尺寸（缓存，拖动定位时复用，避免每帧 WinGetPos），
     ; 再缓存按钮客户区坐标（布局定稿后悬停命中测试用）。
@@ -290,37 +286,23 @@ ToolbarScrollClick(*) {
 }
 
 ; ------------------------------------------------------------------
-; 隐藏「滚动截图」按钮并收缩工具栏（进入编辑阶段时调用）
-; 按钮位于输出组最前（保存左侧）：隐藏后需把其后的输出按钮整体左移填补空位，
-; 并按额外宽度手动收缩窗口（AutoSize 不会因控件隐藏而收缩，实测）。
+; 隐藏「滚动截图」按钮（进入编辑阶段时调用）
+; 仅隐藏，**不左移后续控件、不收缩窗口**：滚动按钮槽位保留为空白，工具栏宽度与中心都不变，
+; 于是「选区 → 编辑」过渡动画里 row1 的水平位移为 0，不再出现整条右移。
+; （原实现隐藏后左移输出按钮并收窄窗口：整条变窄后重新居中的副作用是左缘右移约半个按钮宽，
+;   看起来就是「点工具进入编辑时工具栏往右挪一下」。）
+; 同时把该按钮从悬停命中列表移除，避免空白槽位仍触发悬停高亮 /「滚动截图」提示。
 ; ------------------------------------------------------------------
 EditorHideScrollButton() {
-    global EditorToolbar, EditorToolbarW, EditorToolbarH
-    global EditorScrollButton, EditorScrollExtraW, EditorScrollAfterCtrls
+    global EditorToolbar, EditorScrollButton
     if !EditorScrollButton || !EditorToolbar
         return
-    delta := EditorScrollExtraW
     try EditorScrollButton.Visible := false
-    ; 后续控件整体左移，填补按钮空位（保持输出组相对顺序与间距）
-    if (delta > 0) {
-        for c in EditorScrollAfterCtrls {
-            try {
-                c.GetPos(&cx, &cy)
-                c.Move(cx - delta, cy)
-            }
-        }
-    }
-    if (delta > 0)
-        EditorToolbarW := EditorToolbarW - delta
-    if (EditorToolbarW < 1)
-        EditorToolbarW := 1
-    try EditorToolbar.GetPos(&px, &py)
-    try EditorToolbar.Move(px, py, EditorToolbarW, EditorToolbarH)
-    if IsObject(EditorToolbar.HoverState)
+    if IsObject(EditorToolbar.HoverState) {
+        try EditorToolbar.HoverState.RemoveIcon(EditorScrollButton)
         EditorToolbar.HoverState.CacheRects()
+    }
     EditorScrollButton := 0
-    EditorScrollExtraW := 0
-    EditorScrollAfterCtrls := []
 }
 
 ; ------------------------------------------------------------------
