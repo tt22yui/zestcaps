@@ -66,8 +66,10 @@ try {
         throw Error("exeUrl 解析失败")
     if res["shaUrl"] != "https://github.com/x/y/releases/download/v0.4.0/zestcaps_v0.4.0.exe.sha256"
         throw Error("shaUrl 解析失败")
-    ; 版本比较：AP.exe 当前 0.3.2 < 0.4.0 → 需要更新
-    if VerCompare(res["latestVersion"], APP_VERSION) <= 0
+    ; 版本比较：0.4.0(远程 sample) > 0.3.2(固定基线) → 需要更新
+    ; 用固定基线而非 APP_VERSION：本测试只验证「远程较新」的比较语义，
+    ; 写死 APP_VERSION 会在版本升号（如发布 v0.4.0）后变成 0.4.0 <= 0.4.0 而误报失败
+    if VerCompare(res["latestVersion"], "0.3.2") <= 0
         throw Error("版本比较判定错误")
     FileAppend "OK: Updater.JSON解析/版本比较通过`n", testFile
 } catch as err {

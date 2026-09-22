@@ -25,8 +25,10 @@ try {
         throw Error("exeUrl 解析失败")
     if res["shaUrl"] != "https://github.com/x/y/releases/download/v0.4.0/zestcaps_v0.4.0.exe.sha256"
         throw Error("shaUrl 解析失败")
-    ; 2) 版本比较：0.4.0(远程) > 0.3.2(本地) → 需更新
-    if VerCompare(res["latestVersion"], APP_VERSION) <= 0
+    ; 2) 版本比较：0.4.0(远程 sample) > 0.3.2(固定基线) → 需更新
+    ; 用固定基线而非 APP_VERSION：本测试只验证「远程较新」的比较语义，
+    ; 写死 APP_VERSION 会在版本升号（如发布 v0.4.0）后变成 0.4.0 <= 0.4.0 而误报失败
+    if VerCompare(res["latestVersion"], "0.3.2") <= 0
         throw Error("版本比较判定错误")
     ; 3) ReadFirstHash 读取发布 sha256 首行
     probe := A_Temp "\_tmp_updater_sha_test.txt"
