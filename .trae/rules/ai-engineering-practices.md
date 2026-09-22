@@ -34,7 +34,10 @@ description: 通用 AI 工程工作规范，适用于任意技术栈；项目专
 
 | 主题 | 权威文件 | 覆盖内容 |
 |------|---------|---------|
+| 角色与 git 约束 | [agent-role.md](agent-role.md) | AHK 专家身份、`git push` 禁令、提交前处理未提交改动、开源隐私保护 |
 | 代码风格 | [code-style.md](code-style.md) | 命名、注释、头部指令与作用域、语法、排版、健壮性、测试脚本头部差异 |
 | 调试与验证工作流 | [debug-workflow.md](debug-workflow.md) | 新功能开发流程、测试与调试脚本规范、单元测试、窗口/GUI 测试、产物清理 |
 | 目录结构 | [directory-structure.md](directory-structure.md) | `src/` 按功能建目录、共享/第三方代码入 `Common/` |
+| 项目专属约束 | [project-constraints.md](project-constraints.md) | 构建与 CI、版本与发布、发布日志收录范围、仓库卫生 |
+| 经验教训 | [lessons-learned.md](lessons-learned.md) | 构建/CI 踩坑、AHK v2 实测陷阱 |
 | git 提交信息格式 | [git-commit-message.md](git-commit-message.md) | Conventional Commits 中文提交信息（scene 触发，非 alwaysApply） |
