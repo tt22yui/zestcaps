@@ -64,8 +64,7 @@ Indicator_OnExit(ExitReason, ExitCode) {
 
 ; 定时器回调：更新指示器位置和内容（带缓存，避免无意义重绘）
 _UpdateIndicator() {
-    global IndicatorEnabled, IME_isChinese, IME_WindowStates
-    global IME_SawChinese
+    global IndicatorEnabled
     static prevLabel := "", prevBg := "", prevTxt := ""
     static prevX := 0, prevY := 0, prevVisible := false
     static prevHwnd := 0
@@ -107,32 +106,27 @@ _UpdateIndicator() {
     if (conv = 1) {
         ; 真实读到中文，锁定为中文并记录「该进程转换读法可信」（供后续 conv=0 时判断是否为真实英文）
         chinese := true
-        IME_SawChinese[activeKey] := true
+        SetIMESawChinese(activeKey, true)
     } else if (conv = 0 && imcValid) {
         ; 经典 Win32 窗口拥有 IMM 上下文：转换读法可信，0=确定英文
         chinese := false
     } else if (layout = false) {
         ; 非中文布局 → 确定英文（无论转换读法是否可信）
         chinese := false
-    } else if IME_SawChinese.Has(activeKey) && IME_SawChinese[activeKey] {
+    } else if GetIMESawChinese(activeKey) {
         ; 该进程曾真实读到过中文(WM_IME 有效，如 Trae/Electron)，此时 conv=0 是真实英文
         chinese := false
     } else {
         ; TSF-only 窗口(WebView2/Tauri)：经典读法恒错，用「上次切换」跟踪状态兜底
-        chinese := IME_WindowStates.Has(activeKey) ? IME_WindowStates[activeKey] : false
+        chinese := GetIMEWindowState(activeKey)
     }
 
-    IME_isChinese := chinese
-    IME_WindowStates[activeKey] := chinese
-    ; 防止 Map 无限增长：超过 200 条时淘汰最早记录的进程（跟踪状态与锁存同步裁剪）
-    if IME_WindowStates.Count > 200 {
-        oldest := IndicatorEvictOverflow(IME_WindowStates, 200)
-        if IME_SawChinese.Has(oldest)   ; 缺失键 Delete 会抛错，先 Has
-            IME_SawChinese.Delete(oldest)
-    }
+    SetIMEChinese(chinese)
+    SetIMEWindowState(activeKey, chinese)
+    IMETrimWindowStates(200)   ; 防止 Map 无限增长：超过上限时淘汰最早记录
 
     ; 1. 当前状态（纯函数选标签/配色，便于单测）
-    vis := IndicatorVisual(GetKeyState("CapsLock", "T"), IME_isChinese)
+    vis := IndicatorVisual(GetKeyState("CapsLock", "T"), GetIMEChinese())
     label := vis.label, bg := vis.bg, txt := vis.txt
 
     ; 2. GUI 样式只有变化时才重绘

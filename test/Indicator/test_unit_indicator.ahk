@@ -28,16 +28,6 @@ class IndicatorUnitTest {
         en := IndicatorVisual(false, false)
         Yunit.Assert(en.label = IND_TEXT_EN && en.bg = IND_BG_EN && en.txt = IND_COLOR_EN, "英文应选英/配色")
     }
-
-    test_淘汰仅超限时发生且按插入顺序() {
-        m := Map()
-        m["a"] := 1, m["b"] := 2
-        Yunit.Assert(IndicatorEvictOverflow(m, 5) = "", "未超限不应淘汰")
-        Yunit.Assert(m.Count = 2, "未超限条数不变")
-        Yunit.Assert(IndicatorEvictOverflow(m, 1) = "a", "超限应淘汰最早插入的 key")
-        Yunit.Assert(!m.Has("a") && m.Has("b"), "淘汰后移除 a、保留 b")
-        Yunit.Assert(m.Count = 1, "淘汰后条数减一")
-    }
 }
 
 YunitJUnit.OutputFile := A_ScriptDir "\junit_unit_indicator.xml"

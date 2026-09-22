@@ -10,6 +10,52 @@ IME_WindowStates := Map()
 ; 此时 conv=0 是真实英文；为 false(且无 IMM 上下文)表示 TSF-only 窗口(WebView2/Tauri)，须用跟踪状态。
 IME_SawChinese := Map()
 
+; ------------------------------------------------------------------
+; IME 状态访问入口（P1-1）：InputSwitch / Indicator 不再直接读写上述全局，
+; 统一经本组函数，便于集中维护与检索耦合点。
+; ------------------------------------------------------------------
+; 当前活动窗口中/英
+GetIMEChinese() {
+    global IME_isChinese
+    return IME_isChinese
+}
+SetIMEChinese(v) {
+    global IME_isChinese
+    IME_isChinese := v
+}
+
+; 某窗口的跟踪状态（无记录返回 false，等价旧 `Has ? val : false`）
+GetIMEWindowState(key) {
+    global IME_WindowStates
+    return IME_WindowStates.Has(key) ? IME_WindowStates[key] : false
+}
+SetIMEWindowState(key, v) {
+    global IME_WindowStates
+    IME_WindowStates[key] := v
+}
+
+; 某窗口「曾读到中文」锁存（无记录返回 false）
+GetIMESawChinese(key) {
+    global IME_SawChinese
+    return IME_SawChinese.Has(key) ? IME_SawChinese[key] : false
+}
+SetIMESawChinese(key, v := true) {
+    global IME_SawChinese
+    IME_SawChinese[key] := v
+}
+
+; 防止跟踪 Map 无限增长：超过 limit 条时淘汰最早记录的一条（跟踪状态与锁存同步裁剪）
+IMETrimWindowStates(limit) {
+    global IME_WindowStates, IME_SawChinese
+    if (IME_WindowStates.Count <= limit)
+        return
+    enum := IME_WindowStates.__Enum()
+    enum(&oldest)
+    IME_WindowStates.Delete(oldest)
+    if IME_SawChinese.Has(oldest)   ; 缺失键 Delete 会抛错，先 Has
+        IME_SawChinese.Delete(oldest)
+}
+
 ; 纯函数（便于单测）：语言 ID 是否为中文布局
 ; 0x0804=zh-CN  0x0404=zh-TW  0x0C04=zh-HK  0x1004=zh-SG
 IsChineseLayout(langId) {

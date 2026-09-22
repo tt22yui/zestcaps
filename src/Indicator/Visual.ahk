@@ -14,13 +14,3 @@ IndicatorVisual(capsOn, chinese) {
         return { label: IND_TEXT_CN, bg: IND_BG_CN, txt: IND_COLOR_CN }
     return { label: IND_TEXT_EN, bg: IND_BG_EN, txt: IND_COLOR_EN }
 }
-
-; Map 超过 limit 条时按插入顺序淘汰最早一条，返回其 key；未超限返回 ""
-IndicatorEvictOverflow(m, limit) {
-    if (m.Count <= limit)
-        return ""
-    enum := m.__Enum()
-    enum(&oldest)
-    m.Delete(oldest)
-    return oldest
-}

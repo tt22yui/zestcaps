@@ -90,7 +90,6 @@ CAPS_Switch() {
 
 ; 切换中英文输入法
 IME_Switch() {
-    global IME_WindowStates, IME_isChinese
     if GetKeyState("CapsLock", "T") {
         ; CapsLock 开启时短按：只关掉 CapsLock，不切输入法
         SetCapsLockState false
@@ -105,10 +104,10 @@ IME_Switch() {
     ; 记录本次切换：翻转该窗口自己的跟踪状态
     ; 关键：全新窗口(无历史记录)一律从 false(英文) 起算，绝不继承全局/上一窗口状态，
     ; 否则会把前面窗口的 中/英 带过来且在 TSF 窗口切反（Tauri 场景）。
-    cur := IME_WindowStates.Has(activeKey) ? IME_WindowStates[activeKey] : false
+    cur := GetIMEWindowState(activeKey)
     newState := !cur
-    IME_isChinese := newState
-    IME_WindowStates[activeKey] := newState
+    SetIMEChinese(newState)
+    SetIMEWindowState(activeKey, newState)
     ; 非阻塞延迟刷新指示器，等待 IME 完成切换
     SetTimer ShowInputIndicator, -100
 }
@@ -135,13 +134,12 @@ _SendIMEConvertToggle() {
 ; 与 IME_Switch 的「无条件翻转」不同：仅当检测为中文时才发送一次切换，绝不把英文误切中文；
 ; 复位成功返回 true。中文状态依赖 IME_isChinese（由指示器定时器实时维护）
 ResetIMEToEnglish() {
-    global IME_isChinese, IME_WindowStates
-    if !IME_isChinese
+    if !GetIMEChinese()
         return false
     activeKey := GetActiveProcKey()
     _SendIMEConvertToggle()
-    IME_isChinese := false
-    IME_WindowStates[activeKey] := false
+    SetIMEChinese(false)
+    SetIMEWindowState(activeKey, false)
     DebugLog("自动复位: 中文 -> 英文 (" activeKey ")")
     return true
 }
