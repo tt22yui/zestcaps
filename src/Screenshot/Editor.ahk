@@ -77,6 +77,7 @@ class EditorAnnotation {
     fontSize := 0 ; 字号（图片空间像素，创建时按当前粗细档位快照）；仅 type="text" 使用
     cells := Map()      ; 马赛克已像素化格集（key="row:col"，值固定）；仅 type="mosaic" 使用
     cellColor := Map()  ; 每格平均色缓存（key="row:col" → ARGB，首次扫过算一次后固定）
+    markedSegs := 0     ; 马赛克已处理到的轨迹线段数（增量标记用，避免每帧重扫整条轨迹）
 }
 
 ; ------------------------------------------------------------------

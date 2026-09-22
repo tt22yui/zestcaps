@@ -57,27 +57,38 @@ _BuildOverlaySkipSet() {
 ; 屏幕坐标下最顶层的真实窗口（跳过蒙版/边框/拦截层，按 z-order 从上往下找矩形包含该点的可见顶层窗口）
 ; 说明：GetWindow 的 GW_HWNDNEXT 只遍历同类型窗口，置顶链末尾返回 NULL 无法进入普通窗口，
 ;       因此改用 EnumWindows 枚举全部顶层窗口（按 z-order 从上到下回调），命中即返回。
+; 性能：本函数在选区悬停路径被 10ms 定时器反复调用，改为回调只创建一次复用
+;       （原实现每次 CallbackCreate/CallbackFree 一个闭包机器码 thunk）；查询上下文经模块级全局传递。
 GetWindowBelowPoint(mx, my, skipSet) {
-    r := Buffer(16)
-    found := 0
-    ; 闭包回调：命中第一个（z-order 最上）矩形包含该点且非跳过的可见窗口后停止枚举
-    EnumWinFn(h) {
-        if skipSet.Has(h)
-            return true
-        if !DllCall("IsWindowVisible", "Ptr", h)
-            return true
-        if !DllCall("GetWindowRect", "Ptr", h, "Ptr", r.Ptr)
-            return true
-        l := NumGet(r, 0, "Int"), t := NumGet(r, 4, "Int")
-        rt := NumGet(r, 8, "Int"), b := NumGet(r, 12, "Int")
-        if (mx >= l && mx < rt && my >= t && my < b) {
-            found := h
-            return false  ; 停止枚举
-        }
+    global _GFP_mx, _GFP_my, _GFP_skip, _GFP_found
+    _GFP_mx := mx, _GFP_my := my, _GFP_skip := skipSet, _GFP_found := 0
+    DllCall("EnumWindows", "Ptr", _GetWindowBelowPointCb(), "Ptr", 0)
+    return _GFP_found
+}
+
+; 复用同一个枚举回调（首次调用时创建，进程内不再释放）
+_GetWindowBelowPointCb() {
+    static cb := 0
+    if !cb
+        cb := CallbackCreate(_EnumWinFn)
+    return cb
+}
+
+; EnumWindows 回调：命中第一个（z-order 最上）矩形包含该点且非跳过的可见窗口后停止枚举
+_EnumWinFn(h) {
+    global _GFP_mx, _GFP_my, _GFP_skip, _GFP_found
+    static r := Buffer(16)
+    if _GFP_skip.Has(h)
         return true
+    if !DllCall("IsWindowVisible", "Ptr", h)
+        return true
+    if !DllCall("GetWindowRect", "Ptr", h, "Ptr", r.Ptr)
+        return true
+    l := NumGet(r, 0, "Int"), t := NumGet(r, 4, "Int")
+    rt := NumGet(r, 8, "Int"), b := NumGet(r, 12, "Int")
+    if (_GFP_mx >= l && _GFP_mx < rt && _GFP_my >= t && _GFP_my < b) {
+        _GFP_found := h
+        return false  ; 停止枚举
     }
-    cb := CallbackCreate(EnumWinFn)
-    DllCall("EnumWindows", "Ptr", cb, "Ptr", 0)
-    CallbackFree(cb)
-    return found
+    return true
 }

@@ -29,10 +29,21 @@ global indicatorBriefShow := false
 ; 启动定时器，让指示器跟随鼠标（仅功能开启时启动，避免禁用时空转）
 ; 时间分辨率是否有本进程的提升，供退出时配对 timeEndPeriod
 global indicatorTimePeriodRaised := false
+
+; 按需抬高系统计时精度（P1-5 性能热点）：仅在指示器可见（跟随 IBeam 光标或短暂强制显示）时
+; 抬到 1ms，保证 10ms 位置刷新顺滑；隐藏时立即还原——避免常驻抬高整机时钟中断频率的持续耗电。
+IndicatorSetTimePeriod(on) {
+    global indicatorTimePeriodRaised
+    if (on && !indicatorTimePeriodRaised) {
+        DllCall("winmm\timeBeginPeriod", "uint", 1)
+        indicatorTimePeriodRaised := true
+    } else if (!on && indicatorTimePeriodRaised) {
+        try DllCall("winmm\timeEndPeriod", "uint", 1)
+        indicatorTimePeriodRaised := false
+    }
+}
+
 if IndicatorEnabled {
-    ; 提高系统定时器时钟分辨率为 1ms，让 10ms 周期的位置刷新真正达标（顺滑需要；会轻微增加 CPU 耗电）
-    DllCall("winmm\timeBeginPeriod", "uint", 1)
-    indicatorTimePeriodRaised := true
     SetTimer _UpdateIndicator, IND_UPDATE_INTERVAL
     _UpdateIndicator()
 }
@@ -62,6 +73,7 @@ _UpdateIndicator() {
         if prevVisible {
             IndGUI.Hide()
             prevVisible := false
+            IndicatorSetTimePeriod(false)   ; 隐藏即还原计时精度
         }
         return
     }
@@ -154,6 +166,7 @@ _UpdateIndicator() {
             prevX := mx
             prevY := my
             prevVisible := true
+            IndicatorSetTimePeriod(true)   ; 可见期间才抬高计时精度（跟随更顺滑）
         } else if (mx != prevX || my != prevY) {
             ; 已显示：坐标有任何变化即移动（无死区、不缩放，纯位移最平滑）
             MoveIndicator(mx, my)
@@ -164,6 +177,7 @@ _UpdateIndicator() {
         if prevVisible {
             StartIndicatorFade(false)   ; 触发淡出，完成后由淡出回调隐藏窗口
             prevVisible := false
+            IndicatorSetTimePeriod(false)   ; 不再可见，还原计时精度省电
         }
     }
 }

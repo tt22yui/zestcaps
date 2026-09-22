@@ -152,30 +152,63 @@ _SplashDraw(G, elapsed) {
 ; ------------------------------------------------------------------
 ; 绘制文本：水平居中 + 垂直按行高估算居中
 ; 直接调用 gdiplus 图元绘制（库的 Gdip_TextToGraphics 为 v1 移植，存在兼容性问题，故绕开）
+; 字体与 StringFormat 建一次缓存复用：动画每帧要画 5 段文本，原实现每帧每段都新建/销毁
+; 字体对象（约 300 次/秒）是启动期的性能热点。
 ; ------------------------------------------------------------------
-_SplashText(G, text, x, y, w, h, size, color, font, bold := false) {
+global _splashFontCache := Map()   ; "font|size|bold" -> {family, font}（会话内复用，退出时随 _SplashCleanup 释放）
+global _splashTextFormat := 0      ; 共享的 Center 对齐 StringFormat
+
+_SplashGetFont(font, size, bold) {
+    global _splashFontCache
+    key := font "|" size "|" (bold ? 1 : 0)
+    if _splashFontCache.Has(key)
+        return _splashFontCache[key]
     hFamily := Gdip_FontFamilyCreate(font)
     hFont := Gdip_FontCreate(hFamily, size, bold ? 1 : 0)
-    hFormat := Gdip_StringFormatCreate()
-    Gdip_SetStringFormatAlign(hFormat, 1)   ; Center
+    entry := { family: hFamily, font: hFont }
+    _splashFontCache[key] := entry
+    return entry
+}
+
+_SplashGetFormat() {
+    global _splashTextFormat
+    if !_splashTextFormat {
+        _splashTextFormat := Gdip_StringFormatCreate()
+        Gdip_SetStringFormatAlign(_splashTextFormat, 1)   ; Center
+    }
+    return _splashTextFormat
+}
+
+_SplashText(G, text, x, y, w, h, size, color, font, bold := false) {
+    fe := _SplashGetFont(font, size, bold)
+    hFormat := _SplashGetFormat()
     pBrush := Gdip_BrushCreateSolid("0xFF" color)
     ; 垂直居中：行高约 1.2 倍字号
     y2 := y + Round((h - size * 1.2) / 2)
     CreateRectF(&rc, x, y2, w, h - (y2 - y))
-    DllCall("gdiplus\GdipDrawString", "ptr", G, "str", text, "int", -1, "ptr", hFont, "ptr", rc.Ptr, "ptr", hFormat, "ptr", pBrush)
+    DllCall("gdiplus\GdipDrawString", "ptr", G, "str", text, "int", -1, "ptr", fe.font, "ptr", rc.Ptr, "ptr", hFormat, "ptr", pBrush)
     Gdip_DeleteBrush(pBrush)
-    Gdip_DeleteStringFormat(hFormat)
-    Gdip_DeleteFont(hFont)
-    Gdip_DeleteFontFamily(hFamily)
+    ; 字体/格式不清除：由 _SplashCleanup 统一释放缓存
 }
 
 ; 释放资源并销毁窗口（幂等；句柄未初始化时安全跳过）
 _SplashCleanup() {
     global splashInit, splashToken, splashG, splashHdc, splashHbm, splashObm, SplashGUI
+    global _splashFontCache, _splashTextFormat
     if !splashInit
         return
     splashInit := false
     SetTimer _SplashTick, 0
+    ; 释放缓存的字体/格式（必须在 Gdip_Shutdown 之前）
+    for key, fe in _splashFontCache {
+        try Gdip_DeleteFont(fe.font)
+        try Gdip_DeleteFontFamily(fe.family)
+    }
+    _splashFontCache := Map()
+    if _splashTextFormat {
+        try Gdip_DeleteStringFormat(_splashTextFormat)
+        _splashTextFormat := 0
+    }
     if splashHdc {
         SelectObject(splashHdc, splashObm)   ; 恢复原对象，解除 hbm 选中
         DeleteDC(splashHdc)

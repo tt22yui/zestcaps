@@ -262,14 +262,17 @@ EditorDrawMosaic(G, ann, s) {
     EditorMosaicMarkTrail(ann, EditorBaseBitmap, EditorImgW, EditorImgH, EDIT_MOSAIC_CELL, ann.brushR)
     ; 逐格绘制已像素化的格子（显示坐标 = 格索引 × cell × s），硬边矩形
     Gdip_SetInterpolationMode(G, 5)   ; NearestNeighbor：格子硬边不被缩放柔化
+    ; 复用同一个实心 brush，逐格用 GdipSetSolidFillColor 改色——避免每帧为每格
+    ; Create/DeleteBrush（马赛克笔触拖动的性能热点）
+    pBrush := Gdip_BrushCreateSolid(0xFF000000)
     for key in ann.cells {
         rowCol := StrSplit(key, ":")
         c := Integer(rowCol[1]), r := Integer(rowCol[2])
         gx := c * EDIT_MOSAIC_CELL, gy := r * EDIT_MOSAIC_CELL
-        pBrush := Gdip_BrushCreateSolid(ann.cellColor[key])
+        DllCall("gdiplus\GdipSetSolidFillColor", "Ptr", pBrush, "UInt", ann.cellColor[key])
         Gdip_FillRectangle(G, pBrush, gx * s, gy * s, EDIT_MOSAIC_CELL * s, EDIT_MOSAIC_CELL * s)
-        Gdip_DeleteBrush(pBrush)
     }
+    Gdip_DeleteBrush(pBrush)
 }
 ; ------------------------------------------------------------------
 
@@ -279,10 +282,19 @@ EditorDrawMosaic(G, ann, s) {
 EditorMosaicMarkTrail(ann, src, imgW, imgH, cell, R) {
     if ann.points.Length < 2
         return
-    loop ann.points.Length - 1 {
-        A := ann.points[A_Index], B := ann.points[A_Index + 1]
+    ; 增量：只处理自上次以来新增的线段（ann.markedSegs 记录已处理线段数）。
+    ; 原实现每帧重扫整条轨迹的所有线段，长笔触时是 O(轨迹) 的重复热点。
+    lo := (ann.markedSegs ? ann.markedSegs : 0) + 1
+    hi := ann.points.Length - 1
+    if (lo > hi)
+        return
+    j := lo
+    while j <= hi {
+        A := ann.points[j], B := ann.points[j + 1]
         EditorMosaicMarkSegment(ann, src, imgW, imgH, cell, R, A.x, A.y, B.x, B.y)
+        j++
     }
+    ann.markedSegs := hi
 }
 
 ; 标记线段 A→B 两侧各 R 宽度（胶囊）覆盖的所有格子（格心到线段距离 ≤ R）；幂等累积
