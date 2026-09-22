@@ -99,7 +99,7 @@ UpdaterDlPoll() {
 
 ; 两个文件下载完成：校验 SHA256（若发布附带）→ 用 cmd 延迟替换并重启
 _UpdaterDlFinalize() {
-    global UpdaterDlNewExe, UpdaterDlNewSha, UpdaterDlOnStatus, UpdaterDlOnDone, UpdaterDlActive
+    global UpdaterDlNewExe, UpdaterDlNewSha, UpdaterDlOnStatus, UpdaterDlOnDone, UpdaterDlActive, UpdaterDlTmpDir
     SetTimer(UpdaterDlTimeout, 0)   ; 下载完成，取消看门狗
     ; SHA256 校验（若 sha256 文件存在且可读）
     remoteHash := ReadFirstHash(UpdaterDlNewSha)
@@ -120,7 +120,8 @@ _UpdaterDlFinalize() {
     self := A_AhkPath    ; 实测：编译版下 A_AhkPath 即自身 exe 路径（见 test 报告）
     SplitPath(self, , &exeDir)
     ; cmd 延迟替换：ping 延时约 2 秒等旧进程退出 → 用下载的新 exe 覆盖自身 → 启动新实例
-    cmd := 'cmd /c ping -n 3 127.0.0.1 >nul & if exist "' UpdaterDlNewExe '" move /y "' UpdaterDlNewExe '" "' self '" & start "" "' self '"'
+    ; → 删除本次临时目录（含 .sha256），避免 %TEMP% 残留（成功路径原先不清理）
+    cmd := 'cmd /c ping -n 3 127.0.0.1 >nul & if exist "' UpdaterDlNewExe '" move /y "' UpdaterDlNewExe '" "' self '" & start "" "' self '" & rmdir /s /q "' UpdaterDlTmpDir '"'
     DebugLog("更新: 执行替换并重启 -> " cmd)
     try Run(cmd, exeDir, "Hide")
     catch as err {
