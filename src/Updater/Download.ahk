@@ -15,8 +15,12 @@
 DownloadAndReplace(exeUrl, shaUrl, onStatus := 0, onDone := 0) {
     global APP_VERSION, UpdaterDlOnStatus, UpdaterDlOnDone, UpdaterDlActive
     global UpdaterDlTmpDir, UpdaterDlNewExe, UpdaterDlNewSha, UpdaterDlShaUrl
-    if UpdaterDlActive
-        return  ; 防重入：已有下载进行中
+    if UpdaterDlActive {
+        ; 防重入：已有下载进行中。必须回调 onDone(false)，否则调用方（设置页）会永久停在「下载中…」
+        if IsObject(onDone)
+            onDone.Call(false)
+        return
+    }
     DebugLog("更新: 开始下载更新包 " exeUrl)
     tmpDir := A_Temp "\zestcaps_upd_" A_TickCount
     try DirCreate(tmpDir)
@@ -69,12 +73,15 @@ UpdaterDlPoll() {
     catch
         status := 0
     if (status != 200) {
-        ; exe 下载失败 → 整次失败；sha256 失败（含 404/网络错误）→ 视为发布未附带，跳过校验继续
         if (UpdaterDlFile = UpdaterDlNewExe) {
             _UpdaterDlFail("更新失败：下载新版本文件失败（HTTP " status "）")
+        } else if (status = 404) {
+            ; 发布未附带 sha256：无校验值可对，按兼容处理放行（本仓库 CI 始终附带，见 build.yml）
+            DebugLog("更新: 发布未附带 sha256（404），跳过校验继续")
+            _UpdaterDlFinalize(true)
         } else {
-            DebugLog("更新: sha256 下载失败（HTTP " status "），跳过校验继续")
-            _UpdaterDlFinalize()
+            ; 网络/服务器异常：不得静默降级为「无校验安装」，失败让用户重试
+            _UpdaterDlFail("更新失败：校验文件下载失败（HTTP " status "），已中止")
         }
         return
     }
@@ -98,34 +105,45 @@ UpdaterDlPoll() {
 }
 
 ; 两个文件下载完成：校验 SHA256（若发布附带）→ 用 cmd 延迟替换并重启
-_UpdaterDlFinalize() {
+; skipVerify=true 表示发布未附带 sha256（404），跳过校验
+_UpdaterDlFinalize(skipVerify := false) {
     global UpdaterDlNewExe, UpdaterDlNewSha, UpdaterDlOnStatus, UpdaterDlOnDone, UpdaterDlActive, UpdaterDlTmpDir
     SetTimer(UpdaterDlTimeout, 0)   ; 下载完成，取消看门狗
-    ; SHA256 校验（若 sha256 文件存在且可读）
-    remoteHash := ReadFirstHash(UpdaterDlNewSha)
-    if remoteHash != "" {
-        localHash := SHA256Hex(UpdaterDlNewExe)
-        if (StrLower(remoteHash) != StrLower(localHash)) {
-            DebugLog("更新: SHA256 校验失败（远端 " remoteHash " / 本地 " localHash "）")
-            _UpdaterDlFail("更新失败：下载文件与发布校验值不一致，已中止（可稍后重试）")
-            return
+    ; 整个校验/替换流程包 try：ReadFirstHash/SHA256Hex 的 FileRead 等可能抛异常，
+    ; 一旦逃逸会被全局 OnError 静默吞掉，导致 UpdaterDlActive 永久占用、临时目录残留、onDone 丢失
+    try {
+        if skipVerify {
+            DebugLog("更新: 未附带 sha256，跳过校验")
+        } else {
+            ; SHA256 校验：拿不到校验值（文件缺失/为空）视为异常，fail-closed 中止而非放行无校验安装
+            remoteHash := ReadFirstHash(UpdaterDlNewSha)
+            if remoteHash = "" {
+                _UpdaterDlFail("更新失败：未取得校验值（sha256 文件为空或缺失），已中止（可稍后重试）")
+                return
+            }
+            localHash := SHA256Hex(UpdaterDlNewExe)
+            if (StrLower(remoteHash) != StrLower(localHash)) {
+                DebugLog("更新: SHA256 校验失败（远端 " remoteHash " / 本地 " localHash "）")
+                _UpdaterDlFail("更新失败：下载文件与发布校验值不一致，已中止（可稍后重试）")
+                return
+            }
+            DebugLog("更新: 下载完成且 SHA256 校验通过")
         }
-        DebugLog("更新: 下载完成且 SHA256 校验通过")
-    } else {
-        DebugLog("更新: 未取得 sha256（发布可能未附带），跳过校验")
-    }
-    UpdaterReportStatus(UpdaterDlOnStatus, "下载完成，即将替换并重启…", 1)
-    ; 隐藏托盘图标防止退场残留
-    A_IconHidden := true
-    self := A_AhkPath    ; 实测：编译版下 A_AhkPath 即自身 exe 路径（见 test 报告）
-    SplitPath(self, , &exeDir)
-    ; cmd 延迟替换：ping 延时约 2 秒等旧进程退出 → 用下载的新 exe 覆盖自身 → 启动新实例
-    ; → 删除本次临时目录（含 .sha256），避免 %TEMP% 残留（成功路径原先不清理）
-    cmd := 'cmd /c ping -n 3 127.0.0.1 >nul & if exist "' UpdaterDlNewExe '" move /y "' UpdaterDlNewExe '" "' self '" & start "" "' self '" & rmdir /s /q "' UpdaterDlTmpDir '"'
-    DebugLog("更新: 执行替换并重启 -> " cmd)
-    try Run(cmd, exeDir, "Hide")
-    catch as err {
-        _UpdaterDlFail("更新失败：无法启动替换进程（" err.Message "）")
+        UpdaterReportStatus(UpdaterDlOnStatus, "下载完成，即将替换并重启…", 1)
+        ; 隐藏托盘图标防止退场残留
+        A_IconHidden := true
+        self := A_AhkPath    ; 实测：编译版下 A_AhkPath 即自身 exe 路径（见 test 报告）
+        SplitPath(self, , &exeDir)
+        ; cmd 延迟替换：ping 延时约 2 秒等旧进程退出 → 用下载的新 exe 覆盖自身 → 启动新实例。
+        ; 用 if errorlevel 区分 move 成败：成功才 start 新实例并清理临时目录；
+        ; 失败则 start 旧实例（self 未被替换）且不删下载文件，避免「静默重启旧版还删掉新包」
+        cmd := 'cmd /c ping -n 3 127.0.0.1 >nul & move /y "' UpdaterDlNewExe '" "' self '"'
+        cmd .= ' & if errorlevel 1 (start "" "' self '") else (start "" "' self '" & rmdir /s /q "' UpdaterDlTmpDir '")'
+        DebugLog("更新: 执行替换并重启 -> " cmd)
+        Run(cmd, exeDir, "Hide")
+    } catch as err {
+        ; 校验/替换过程异常：统一走失败收尾，避免回调丢失、临时目录残留、UpdaterDlActive 永久占用
+        _UpdaterDlFail("更新失败：校验/替换过程出错（" err.Message "）")
         return
     }
     UpdaterDlActive := false
