@@ -141,5 +141,7 @@ ShRecycleDelete(paths) {
     }
 }
 
-; 启动时按配置初始化定时
-InitRecycleBinTimer()
+; 启动时按配置初始化定时（加载期失败只记日志，不中断整个脚本启动）
+try InitRecycleBinTimer()
+catch as rbErr
+    DebugLog("回收站: 初始化定时器失败 - " rbErr.Message)

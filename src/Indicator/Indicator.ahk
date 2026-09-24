@@ -19,12 +19,19 @@ CoordMode "Mouse", "Screen"
 ; 注意：基础样式【不加】WS_EX_LAYERED —— 分层窗在 DWM 下每次位移都逐帧合成，跟随会卡/拖影。
 ; 仅淡入淡出瞬间由 WinSetTransparent 临时上分层，完成后 Off 还原为普通窗（位移最平滑）。
 ; +E0x20(WS_EX_TRANSPARENT) 鼠标穿透  +E0x08000000(WS_EX_NOACTIVATE) 不抢焦点
-IndGUI := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x08000000 +Border")
-IndGUI.SetFont(IND_FONT_SIZE " " IND_FONT_WEIGHT, IND_FONT_NAME)
-IndGUI.MarginX := 0, IndGUI.MarginY := 0
-IndText := IndGUI.Add("Text", "cWhite x0 y0 w" IND_WIDTH " h" IND_HEIGHT " Center 0x200", IND_TEXT_CN)
-IndGUI.Show("w" IND_WIDTH " h" IND_HEIGHT " NoActivate")
-IndGUI.Hide()
+; 加载期窗口调用可能失败：整体兜底为「停用指示器」而非中断启动（否则 OnError 吞异常后
+; Main.ahk 后续的热键/托盘初始化被跳过，界面却毫无提示）
+try {
+    IndGUI := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x08000000 +Border")
+    IndGUI.SetFont(IND_FONT_SIZE " " IND_FONT_WEIGHT, IND_FONT_NAME)
+    IndGUI.MarginX := 0, IndGUI.MarginY := 0
+    IndText := IndGUI.Add("Text", "cWhite x0 y0 w" IND_WIDTH " h" IND_HEIGHT " Center 0x200", IND_TEXT_CN)
+    IndGUI.Show("w" IND_WIDTH " h" IND_HEIGHT " NoActivate")
+    IndGUI.Hide()
+} catch as indErr {
+    IndicatorEnabled := false
+    DebugLog("指示器: GUI 初始化失败，已停用指示器 - " indErr.Message)
+}
 
 ; 短暂强制显示标记：为 true 时忽略光标类型，强制显示指示器
 global indicatorBriefShow := false

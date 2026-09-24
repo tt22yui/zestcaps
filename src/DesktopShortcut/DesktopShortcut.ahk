@@ -38,5 +38,10 @@ SetDesktopShortcut(Enabled) {
 }
 
 ; 启动时自动补齐：配置要求创建桌面快捷方式但被删（如用户手删）时补建，保证状态一致
-if DesktopShortcutEnabled && !IsDesktopShortcutCreated()
-    CreateDesktopShortcut()
+; 加载期调用整体兜底：失败只记日志，不中断整个脚本启动
+try {
+    if DesktopShortcutEnabled && !IsDesktopShortcutCreated()
+        CreateDesktopShortcut()
+} catch as dsErr {
+    DebugLog("桌面快捷方式: 启动补齐失败 - " dsErr.Message)
+}
