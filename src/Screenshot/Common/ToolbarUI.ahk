@@ -260,8 +260,10 @@ class ToolbarHoverState {
     ; 悬停命中刷新（WM_MOUSEMOVE 分发）：命中按钮→高亮；光标离开窗口→复位
     HitTestAndRefresh(hwnd) {
         static TME_LEAVE := 0x2
-        tme := Buffer(16, 0)
-        NumPut("UInt", 16, tme, 0)          ; cbSize
+        ; TRACKMOUSEEVENT 大小随指针宽度变化：x64 = 24（cbSize 4 + flags 4 + hwnd 8 + hoverTime 4 + 对齐 4），x86 = 16
+        static tmeSize := A_PtrSize = 8 ? 24 : 16
+        tme := Buffer(tmeSize, 0)
+        NumPut("UInt", tmeSize, tme, 0)     ; cbSize（必须等于结构体实际大小，否则 TrackMouseEvent 可能失败、收不到 WM_MOUSELEAVE）
         NumPut("UInt", TME_LEAVE, tme, 4)   ; dwFlags
         NumPut("Ptr", hwnd, tme, 8)         ; hwndTrack
         DllCall("TrackMouseEvent", "Ptr", tme)
