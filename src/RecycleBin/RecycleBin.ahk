@@ -112,6 +112,10 @@ SafeRecycleDelete(RPath, IPath) {
 
 ; 调用 SHFileOperationW 静默永久删除给定物理路径列表
 ; pFrom 为双 null 结尾的多路径列表（FO_DELETE | SILENT | NOCONFIRMATION | NOERRORUI）
+; ⚠️ 必须显式「不」设置 FOF_ALLOWUNDO(0x0040)：SHFileOperation 默认永久删除，
+;    一旦带上 FOF_ALLOWUNDO 会把文件送入回收站——而本模块删除的正是 $RECYCLE.BIN 内的
+;    $R/$I，等于把回收站再回收一遍（时间戳刷新/操作失败），永远释放不出空间。
+;    易混常量：FOF_ALLOWUNDO=0x0040（送入回收站），FOF_NOERRORUI=0x0400（不弹错误框），二者不是一回事。
 ShRecycleDelete(paths) {
     try {
         p := ""
@@ -124,11 +128,11 @@ ShRecycleDelete(paths) {
         if A_PtrSize = 8 {                     ; x64：hwnd(8) wFunc(8) pFrom(16) pTo(24) fFlags(32)
             NumPut("UInt", 0x0003, fop, 8)     ; wFunc = FO_DELETE
             NumPut("Ptr", pFrom.Ptr, fop, 16)
-            NumPut("UInt", 0x0004 | 0x0010 | 0x0040, fop, 32)   ; SILENT|NOCONFIRMATION|NOERRORUI
+            NumPut("UInt", 0x0004 | 0x0010 | 0x0400, fop, 32)   ; SILENT|NOCONFIRMATION|NOERRORUI（不含 ALLOWUNDO）
         } else {                               ; x86：hwnd(4) wFunc(4) pFrom(8) pTo(12) fFlags(16)
             NumPut("UInt", 0x0003, fop, 4)
             NumPut("Ptr", pFrom.Ptr, fop, 8)
-            NumPut("UInt", 0x0004 | 0x0010 | 0x0040, fop, 16)
+            NumPut("UInt", 0x0004 | 0x0010 | 0x0400, fop, 16)   ; SILENT|NOCONFIRMATION|NOERRORUI（不含 ALLOWUNDO）
         }
         return DllCall("shell32\SHFileOperationW", "Ptr", fop, "UInt") = 0
     } catch as err {
