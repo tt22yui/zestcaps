@@ -146,6 +146,24 @@ class ScrollUnitTest {
         ScrollTestDispose([page, fA, fB, expectedBmp, r1, r2])
     }
 
+    test_固定底栏高度超过三分之一仍可剔除() {
+        ; 回归：底栏 150px = 帧高 400 的 37.5% > 旧上限 curH//3(133)，
+        ; 旧实现检测不到 → rectBottom 落进底栏 → 匹配永远失败、长图不再增长
+        page := ScrollTestPage(80, 800)
+        footH := 150
+        fA := ScrollTestFrame(page, 80, 0, 400, footH)
+        fB := ScrollTestFrame(page, 80, 50, 400, footH)
+        contentRows := (400 - footH) + 50   ; 250 + 50 = 300
+        expectedBmp := ScrollTestExpected(page, 80, contentRows, footH)
+        best := {count: 0, index: 0, ignoreBottom: 0}
+        ScrollStitchReset(best)
+        r1 := ScrollStitchFrame(0, fA, true, best, &status)
+        r2 := ScrollStitchFrame(r1, fB, true, best, &status)
+        Yunit.Assert(status = 0, "高底栏拼接状态应为成功")
+        Yunit.Assert(ScrollImagesIdentical(r2, expectedBmp), "底栏超过帧高 1/3 时仍应被剔除并正确拼接")
+        ScrollTestDispose([page, fA, fB, expectedBmp, r1, r2])
+    }
+
     test_画面一致性判定() {
         page := ScrollTestPage(80, 300)
         fA := ScrollTestFrame(page, 80, 0, 100, 0)

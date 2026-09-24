@@ -100,23 +100,26 @@ ScrollStitchFrame(result, current, autoIgnoreBottom, best, &status) {
     baseR := pR + pixelSize * ignoreSide
     baseC := pC + pixelSize * ignoreSide
 
-    ; 底部忽略区（固定底栏 / 末行不稳）：从底部向上找首个不同的行，把相同行并入忽略区
-    ignoreBotMax := curH // 3
-    ignoreBot := Max(50, curH // 10)
+    ; 底部忽略区（固定底栏 / 末行不稳）：从底部向上找首个不同的行，连续相同行数即固定底栏高度。
+    ; 上限放宽到「帧高扣除至少 10% 内容行」：旧的 curH//3 上限会在固定底栏超过帧高 1/3 时漏检，
+    ; 使 rectBottom 落进底栏、匹配永远失败（表现为长图始终卡在首帧高度、不再增长，见合成位图回归）。
+    ignoreBotMin := Max(50, curH // 10)                       ; 末行不稳的最小忽略量（无固定底栏时）
+    ignoreBotMax := Max(ignoreBotMin, curH - Max(10, curH // 10))
+    ignoreBot := 0
     if autoIgnoreBottom {
         lastR := baseR + (resH - 1) * sR
         lastC := baseC + (curH - 1) * sC
         idx := 0
-        while (idx <= ignoreBotMax) {
-            if !ScrollBytesEqual(lastR - idx * sR, lastC - idx * sC, compareLen) {
-                ignoreBot += idx
+        while (idx < ignoreBotMax) {
+            if !ScrollBytesEqual(lastR - idx * sR, lastC - idx * sC, compareLen)
                 break
-            }
             idx++
         }
-        ignoreBot := Max(ignoreBot, best.ignoreBottom)
+        ; idx = 底部连续相同行数（固定底栏高度）；best 跨帧只增不减，避免底栏高度抖动
+        ignoreBot := Max(idx, best.ignoreBottom)
     }
-    ignoreBot := Min(ignoreBot, ignoreBotMax)
+    ; 至少忽略末行不稳带，再夹到上限，保证 rectBottom 仍落在内容区
+    ignoreBot := Min(Max(ignoreBot, ignoreBotMin), ignoreBotMax)
     rectBottom := resH - ignoreBot - 1
 
     ; 在结果底部行与新帧各行之间找最长连续匹配（即最大重叠高度）
@@ -152,6 +155,12 @@ ScrollStitchFrame(result, current, autoIgnoreBottom, best, &status) {
     if (matchCount > 0) {
         matchHeight := curH - matchIndex - 1
         if (matchHeight > 0) {
+            ; 防御：匹配到的重叠不足以覆盖底部忽略带（如 bestGuess 沿用陈旧 index）时，
+            ; 宁可不拼接（保留已累计长图）也不缩短已拼接内容或造成越界读数
+            if (matchHeight < ignoreBot) {
+                status := 2
+                return 0
+            }
             if (matchCount > best.count) {
                 best.count := matchCount
                 best.index := matchIndex
