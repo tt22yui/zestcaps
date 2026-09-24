@@ -173,6 +173,7 @@ UpdaterStartRequest(url, onResult) {
     UpdaterReqDone := false
     UpdaterOnReady := onResult
     UpdaterReq := ""
+    SetTimer(UpdaterTimeout, 0)   ; 取消上一次可能残留的看门狗，避免误杀本次请求
     DebugLog("更新: 发起检查请求 " url)
     try {
         req := ComObject("MSXML2.ServerXMLHTTP")
@@ -211,11 +212,13 @@ UpdaterPoll() {
 
 ; 请求超时看门狗
 UpdaterTimeout() {
-    global UpdaterReqDone, UpdaterOnReady, UpdaterPollTimer
+    global UpdaterReqDone, UpdaterOnReady, UpdaterPollTimer, UpdaterReq
     if UpdaterReqDone
         return
+    SetTimer UpdaterTimeout, 0   ; 自身为一次性定时器，显式取消防止残留
     SetTimer UpdaterPoll, 0
     UpdaterPollTimer := 0
+    UpdaterReq := ""             ; 释放请求对象，停止后续回调
     DebugLog("更新: 检查请求超时（15s）")
     handleUpdaterTimeoutCallback(UpdaterOnReady)
     UpdaterReqDone := true
@@ -239,27 +242,34 @@ UpdaterFinishRequest(req) {
     if UpdaterReqDone
         return
     UpdaterReqDone := true
+    ; 请求已完成：取消超时看门狗。若成功路径不取消，这个一次性 15s 定时器会残留，
+    ; 当用户在 15s 内再次发起检查时会误判新请求超时（旧定时器触发时 UpdaterReqDone 已复位为 false）
+    SetTimer(UpdaterTimeout, 0)
     onResult := UpdaterOnReady
-    UpdaterOnReady := ""
+    UpdaterOnReady := ""   ; 先取出并清空，异常时也要保证回调被调用（见下方 catch）
     result := NewUpdateResult("", APP_VERSION, false)
-    if (req.Status != 200) {
-        result["error"] := "HTTP " req.Status
-        DebugLog("更新: 检查失败 HTTP " req.Status)
-        if IsSet(onResult)
-            onResult(result)
-        return
+    try {
+        if (req.Status != 200) {
+            result["error"] := "HTTP " req.Status
+            DebugLog("更新: 检查失败 HTTP " req.Status)
+        } else {
+            ParseGithubRelease(req.ResponseText, &result)
+            latest := result["latestVersion"]
+            if latest != "" {
+                ; VerCompare 返回正数表示远程较新（需要更新）
+                result["needUpdate"] := VerCompare(latest, APP_VERSION) > 0
+                DebugLog("更新: 最新 v" latest " / 当前 v" APP_VERSION " → needUpdate=" (result["needUpdate"] ? 1 : 0))
+            } else {
+                result["error"] := "无法解析最新版本"
+                DebugLog("更新: 响应中未解析出 tag_name")
+            }
+        }
+    } catch as err {
+        ; 读取/解析响应异常（COM 属性、正则等）：回报失败而非静默卡死
+        result["error"] := "解析响应失败：" err.Message
+        DebugLog("更新: 解析响应异常 - " err.Message)
     }
-    ParseGithubRelease(req.ResponseText, &result)
-    latest := result["latestVersion"]
-    if latest != "" {
-        ; VerCompare 返回正数表示远程较新（需要更新）
-        result["needUpdate"] := VerCompare(latest, APP_VERSION) > 0
-        DebugLog("更新: 最新 v" latest " / 当前 v" APP_VERSION " → needUpdate=" (result["needUpdate"] ? 1 : 0))
-    } else {
-        result["error"] := "无法解析最新版本"
-        DebugLog("更新: 响应中未解析出 tag_name")
-    }
-    if IsSet(onResult)
+    if IsObject(onResult)
         onResult(result)
 }
 
