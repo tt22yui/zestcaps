@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-24
+
+### 修复
+
+- **v0.4.1 启动即崩**：闪屏字体/格式缓存的全局初始化排在首次绘制之后，首次启动读到未赋值全局，
+  抛「This global variable has not been assigned a value」直接崩溃；已将缓存初始化上移到文件顶部，
+  并预置运行时句柄默认值（Indicator 同类隐患一并消除）。
+- **定时清理回收站释放不出空间**：`SHFileOperation` 的永久删除标志位误用 `FOF_ALLOWUNDO(0x0040)`
+  （正确应为 `FOF_NOERRORUI(0x0400)`），导致回收站内的 `$R/$I` 被再次送入回收站而非永久删除；
+  现改为真正的永久删除。
+- **滚动截图遇到较高的固定底栏时不再拼接**：底部忽略区检测上限写死为帧高的 1/3，固定底栏超过该比例
+  时检测不到，`rectBottom` 落进底栏导致匹配永远失败、长图卡在首帧不再增长；已放宽检测上限并加防御，
+  匹配不足时宁可不拼接也不缩短已累计长图。
+- **截图标注的光标与拖动**：非画笔工具下编辑窗默认箭头光标无法恢复（`WM_SETCURSOR` 回调误返回
+  `false` 吞掉默认处理）；拖动丢失鼠标松开消息时工具栏不恢复、鼠标捕获未释放；均已修正。
+- **工具栏悬停高亮偶发「粘住」**：x64 下 `TRACKMOUSEEVENT` 结构体大小传成 16（应为 24），
+  `TrackMouseEvent` 可能失败导致收不到 `WM_MOUSELEAVE`；现按指针宽度取 24/16。
+- **自动更新「检查更新」偶发卡住或误报超时**：请求完成后未取消 15 秒看门狗，15 秒内再次检查会被
+  旧定时器误判为超时；响应解析异常被全局处理器静默吞掉，界面永久停在「检查中…」；均已修正。
+- **自动更新下载/替换失败处理**：下载进行中再次点「下载并更新」会让按钮永久停在「下载中…」；
+  校验文件因网络错误下载失败被当成「发布未附带」而跳过校验；替换命令忽略 `move` 失败会重启旧版
+  并删掉刚下载的新包；现分别改为失败时回调恢复按钮、网络错误一律中止（仅 404 视为未附带而跳过），
+  替换按 `move` 成败决定重启新/旧版本且失败不删下载包。
+- **加载期初始化失败不再中断启动**：指示器窗口、回收站定时器、桌面快捷方式初始化失败时，
+  此前会静默中断其后热键与托盘的注册；现只记日志并优雅降级。
+
+### 变更
+
+- **滚动截图期间隐藏输入状态指示器**：指示器跟随光标会被截进长图，现抓帧期间强制隐藏，结束后恢复。
+
 ## [0.4.1] - 2026-09-22
 
 ### 修复
@@ -369,7 +399,10 @@
 - 基于 AutoHotkey v2，绿色免安装；`build.bat` 可编译为独立 `zestcaps.exe`
 - 全局未捕获错误处理与调试日志，配备按键看门狗防假死
 
-[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/tt22yui/zestcaps/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/tt22yui/zestcaps/releases/tag/v0.4.2
+[0.4.1]: https://github.com/tt22yui/zestcaps/releases/tag/v0.4.1
+[0.4.0]: https://github.com/tt22yui/zestcaps/releases/tag/v0.4.0
 [0.3.7]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.7
 [0.3.6]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.6
 [0.3.5]: https://github.com/tt22yui/zestcaps/releases/tag/v0.3.5
