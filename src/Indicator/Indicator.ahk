@@ -45,6 +45,13 @@ global indicatorTimePeriodRaised := false
 global indAlpha := 0          ; 当前窗口透明度 0-255
 global indFadeHide := false   ; 本次淡出完成后是否需要隐藏窗口
 
+; 抓帧期抑制：滚动截图等持续抓屏场景置 true，强制隐藏指示器且不再显示，避免随光标被截进画面。
+; 采用引用计数支持多阶段重叠（各阶段成对 on/off，互不误启用）；IndicatorCaptureSuppress 为派生状态
+global IndicatorCaptureSuppressCount := 0
+global IndicatorCaptureSuppress := false
+; 抑制回调的 super-global 引用：由下方注册，供其它模块软调用（测试可不加载本模块）
+global IndicatorCaptureSuppressFn := 0
+
 ; 按需抬高系统计时精度（P1-5 性能热点）：仅在指示器可见（跟随 IBeam 光标或短暂强制显示）时
 ; 抬到 1ms，保证 10ms 位置刷新顺滑；隐藏时立即还原——避免常驻抬高整机时钟中断频率的持续耗电。
 IndicatorSetTimePeriod(on) {
@@ -63,6 +70,19 @@ if IndicatorEnabled {
     _UpdateIndicator()
 }
 
+; 设置「抓帧期抑制」：滚动截图等抓屏场景调用，成对 on(true)/off(false)，可多阶段重叠。
+; 抑制期间强制隐藏指示器并阻止显示，计数归零后按当前光标/状态重新判定；
+; 经 super-global 回调供其它模块调用（见文件顶部声明）
+IndicatorSetCaptureSuppress(on) {
+    global IndicatorCaptureSuppress, IndicatorCaptureSuppressCount, indicatorBriefShow
+    IndicatorCaptureSuppressCount := Max(0, IndicatorCaptureSuppressCount + (on ? 1 : -1))
+    IndicatorCaptureSuppress := IndicatorCaptureSuppressCount > 0
+    if IndicatorCaptureSuppress
+        indicatorBriefShow := false
+    _UpdateIndicator()
+}
+IndicatorCaptureSuppressFn := IndicatorSetCaptureSuppress
+
 ; 退出时配对释放时间分辨率提升（进程退出系统本会回收，但显式配对更规范：
 ; 不配对会在本进程整个生命周期内持续抬高系统计时精度，影响其他程序与笔记本耗电）
 OnExit(Indicator_OnExit)
@@ -76,21 +96,33 @@ Indicator_OnExit(ExitReason, ExitCode) {
 
 ; 定时器回调：更新指示器位置和内容（带缓存，避免无意义重绘）
 _UpdateIndicator() {
-    global IndicatorEnabled
+    global IndicatorEnabled, IndicatorCaptureSuppress
     static prevLabel := "", prevBg := "", prevTxt := ""
     static prevX := 0, prevY := 0, prevVisible := false
     static prevHwnd := 0
     static imeFailStreak := 0   ; IME 检测连续失败计数（仅用于日志节流：只在失败起始拍记一条）
+    static suppressHidden := false   ; 抓帧抑制是否已执行隐藏（避免每拍重复隐藏）
 
     ; 功能关闭时不再做 IME 检测，仅负责隐藏已显示的指示器
     if !IndicatorEnabled {
         if prevVisible {
-            IndGUI.Hide()
+            _IndicatorHideNow()
             prevVisible := false
-            IndicatorSetTimePeriod(false)   ; 隐藏即还原计时精度
         }
         return
     }
+
+    ; 抓帧期（滚动截图等）：强制隐藏指示器，避免其随光标被截进画面；不做 IME 检测。
+    ; 无条件隐藏（不只依赖 prevVisible）：淡出进行中或状态失配时也能立即消失
+    if IndicatorCaptureSuppress {
+        if !suppressHidden {
+            _IndicatorHideNow()
+            prevVisible := false
+            suppressHidden := true
+        }
+        return
+    }
+    suppressHidden := false   ; 未抑制：允许下次抑制时重新执行隐藏
 
     activeHwnd := WinExist("A")
     activeKey := GetActiveProcKey()   ; 稳定跟踪键（进程名），与 IME_Switch 使用的键一致
@@ -207,6 +239,17 @@ MoveIndicator(x, y) {
     DllCall("user32\SetWindowPos", "ptr", hwnd, "ptr", 0, "int", x, "int", y, "int", 0, "int", 0, "uint", 0x15)
 }
 
+; 立即隐藏指示器（无淡出）：取消进行中的淡入淡出、归零透明度、隐藏窗口并还原为普通窗、还原计时精度。
+; 供「功能关闭」「抓帧抑制」「淡出结束」等需要立即消失的场景复用（幂等）
+_IndicatorHideNow() {
+    global indAlpha
+    SetTimer _IndicatorFadeStep, 0
+    indAlpha := 0
+    try IndGUI.Hide()
+    try WinSetTransparent("Off", IndGUI)   ; 还原为普通窗，供下次平滑跟随
+    IndicatorSetTimePeriod(false)
+}
+
 ; 启动一次淡入(toShow=true)或淡出(toShow=false)
 StartIndicatorFade(toShow) {
     global indFadeHide, IND_FADE_PERIOD
@@ -222,11 +265,8 @@ _IndicatorFadeStep() {
         step := Ceil(255 * IND_FADE_PERIOD / IND_FADE_OUT_MS)
         indAlpha -= step
         if indAlpha <= 0 {
-            indAlpha := 0
-            SetIndicatorAlpha(indAlpha)
-            SetTimer _IndicatorFadeStep, 0
-            IndGUI.Hide()
-            WinSetTransparent("Off", IndGUI)   ; 淡出完成：隐藏并还原为普通窗，供下次平滑跟随
+            ; 淡出完成：复用统一的立即隐藏（归零透明度 + 隐藏 + 还原普通窗）
+            _IndicatorHideNow()
         } else {
             SetIndicatorAlpha(indAlpha)
         }

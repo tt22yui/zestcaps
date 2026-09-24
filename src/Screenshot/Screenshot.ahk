@@ -44,6 +44,18 @@ global ScreenshotSelOverlays := 0   ; 选区确认后保留的覆盖层（{mask,
 global ScreenshotAdjustCtx := 0     ; 选区微调阶段上下文（{region, borders, selGui, maskGui, mx/my/mw/mh, state, toolbar, drag}），消息钩子/定时器共享
 global ScreenshotSaveFilename := "" ; 选区保存确认的保存路径（SelectRegion 内确认后交外层落盘；取消保存不设置）
 global ScreenshotSaveBitmap := 0    ; 选区保存确认时已定格的截图位图（SelectRegion 内先抓图再弹框，交外层落盘并释放；取消保存不设置）
+
+; ------------------------------------------------------------------
+; 抑制/恢复输入状态指示器：滚动截图等持续抓屏场景调用，避免指示器随光标被截进画面。
+; 经 Indicator.ahk 注册的 super-global 回调软调用（仅 #Include Screenshot 的测试里该变量不存在，
+; IsSet 判定后自动跳过，避免硬依赖导致加载失败）；采用引用计数，多阶段可成对 on/off 复用本函数。
+; ------------------------------------------------------------------
+SuppressIndicator(on) {
+    global IndicatorCaptureSuppressFn
+    if IsSet(IndicatorCaptureSuppressFn) && IsObject(IndicatorCaptureSuppressFn)
+        try IndicatorCaptureSuppressFn.Call(on)
+}
+
 GdipToken := Gdip_Startup()
 if !GdipToken {
     ; GDI+ 不可用时只停用截图功能，不弹模态框、更不退出脚本：
@@ -313,6 +325,7 @@ SelectRegionToCapture() {
                 } finally {
                     MaskOverlayDestroy(ovs.mask)
                     BorderStripsDestroy(ovs.borders)
+                    SuppressIndicator(false)   ; 兜底恢复指示器（RunScrollCapture 内部异常时也能恢复）
                 }
                 if !scrollBmp {
                     DebugLog("Screenshot: 滚动截图取消/失败")

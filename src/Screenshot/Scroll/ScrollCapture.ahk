@@ -193,11 +193,13 @@ RunScrollCapture(region) {
     global ScreenshotEscCancel
 
     region.GetRegionRect(&rx, &ry, &rw, &rh)
+    SuppressIndicator(true)   ; 先抑制指示器，保证首帧不含指示器
     tip := ScrollTipCreate({l: rx, t: ry, r: rx + rw, b: ry + rh})
 
     f0 := CaptureRegion(region)
     if !f0 {
         ScrollTipDestroy(tip)
+        SuppressIndicator(false)
         DebugLog("滚动截图: 初始抓帧失败")
         return 0
     }
@@ -207,6 +209,7 @@ RunScrollCapture(region) {
     if !result {
         Gdip_DisposeImage(f0)
         ScrollTipDestroy(tip)
+        SuppressIndicator(false)
         DebugLog("滚动截图: 初始帧初始化失败")
         return 0
     }
@@ -267,6 +270,7 @@ RunScrollCapture(region) {
         ScreenshotEscCancel := 0
         EscUnregister()
         ScrollTipDestroy(tip)
+        SuppressIndicator(false)   ; 恢复指示器（成功/取消/超时/异常均走这里）
     }
     if staged
         Gdip_DisposeImage(staged)
