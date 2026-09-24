@@ -111,35 +111,42 @@ EditorDragTick() {
     if !EditorDragging
         return
     ; 自愈：左键已物理弹起却仍标记拖动中（WM_LBUTTONUP 丢失，如被其他程序抢走或系统卡顿）——
-    ; 否则编辑窗会一直黏着鼠标跟随、10ms 定时器持续空转（与 Pin.ahk 的 PinDragTick 同一处理）
+    ; 否则编辑窗会一直黏着鼠标跟随、10ms 定时器持续空转，且拖动期间隐藏的工具栏永不恢复；
+    ; 走与正常松开一致的收尾（释放捕获 + 恢复两行工具栏）
     if !GetKeyState("LButton", "P") {
-        EditorDragging := false
-        SetTimer EditorDragTick, 0
-        EditorApplyDrag()   ; 应用最后一帧位置
+        EditorFinishDrag()
         return
     }
     EditorApplyDrag()
 }
 
+; 结束编辑窗拖动（正常松开与自愈路径共用）：停合并定时器、释放鼠标捕获、
+; 应用末帧位置，并恢复拖动期间隐藏的两行工具栏
+EditorFinishDrag() {
+    global EditorDragging, EditorToolbar, EditorColorToolbar
+    EditorDragging := false
+    SetTimer EditorDragTick, 0
+    DllCall("ReleaseCapture")
+    EditorApplyDrag()  ; 应用最后一帧位置，避免松开瞬间的滞后
+    ; 恢复两行工具栏并贴附到编辑窗新位置（蒙版/边框已在拖动中跟随，无需恢复）
+    if EditorToolbar {
+        EditorRepositionToolbar()
+        EditorToolbar.Show("NA")
+    }
+    if EditorColorToolbar
+        EditorColorToolbar.Show("NA")
+}
+
 EditorLButtonUp(wParam, lParam, msg, hwnd) {
     global EditorHwnd, EditorPending, EditorAnnotations, EditorScale
-    global EditorDragging, EditorToolbar, EditorColorToolbar, EditorWinW, EditorWinH
+    global EditorDragging, EditorWinW, EditorWinH
     if (hwnd != EditorHwnd)
         return
-    DllCall("ReleaseCapture")
     if EditorDragging {
-        EditorDragging := false
-        SetTimer EditorDragTick, 0  ; 停掉合并定时器
-        EditorApplyDrag()  ; 应用最后一帧位置，避免松开瞬间的滞后
-        ; 恢复两行工具栏并贴附到编辑窗新位置（蒙版/边框已在拖动中跟随，无需恢复）
-        if EditorToolbar {
-            EditorRepositionToolbar()
-            EditorToolbar.Show("NA")
-        }
-        if EditorColorToolbar
-            EditorColorToolbar.Show("NA")
+        EditorFinishDrag()
         return
     }
+    DllCall("ReleaseCapture")
     if !EditorPending
         return
     EditorPending.x2 := (lParam << 48 >> 48) / EditorScale
@@ -181,9 +188,14 @@ EditorSetCursor(wParam, lParam, msg, hwnd) {
     global EditorTool
     if (hwnd != EditorHwnd)
         return
-    if (EditorTool = "brush" || EditorTool = "mosaic")
-        return EditorApplyCircleCursor()   ; true=已处理（用小圆圈）；false=交系统默认
-    return false  ; 交给系统默认
+    if (EditorTool = "brush" || EditorTool = "mosaic") {
+        ; 小圆圈光标已设置：返回 true 接管本消息；生成失败则落到下方裸 return 交系统默认
+        if EditorApplyCircleCursor()
+            return true
+    }
+    ; 其它工具默认箭头 / 光标生成失败：裸 return。切勿写 return false——AHK v2 中返回整数
+    ; （含 0/false）会被当作消息应答并终止 WM_SETCURSOR 默认处理，导致编辑窗默认光标无法恢复
+    ; （与 Select.ahk:558 记录的同款陷阱一致）
 }
 
 ; 应用小圆圈光标（画笔/马赛克）；返回 true 表示已设置，false 表示生成失败走默认

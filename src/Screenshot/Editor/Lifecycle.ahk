@@ -80,6 +80,13 @@ EditorCleanup() {
     global EditorPending, EditorResult, EditorAnnotations, EditorBgBitmap, EditorBgBase
     global EditorCircleCursor
     EditorTextEnd()   ; 防御：若存在未结束的文本输入会话，销毁覆盖窗并注销消息
+    ; 消息钩子统一注销（初始化中途异常时主循环的 finally 未执行，否则会残留为常驻无操作钩子）
+    OnMessage(0x201, EditorLButtonDown, 0)
+    OnMessage(0x200, EditorMouseMove, 0)
+    OnMessage(0x202, EditorLButtonUp, 0)
+    OnMessage(0x204, EditorRButtonDown, 0)
+    OnMessage(0x20, EditorSetCursor, 0)
+    OnMessage(0x0005, EditorSizeChanged, 0)
     EditorCloseOverlays()
     EditorOverlayCleanup()
     if EditorGui {
@@ -157,20 +164,36 @@ EditorPinInPlace() {
     EditorBorders := []
 
     ; 关闭工具栏，销毁蒙版（绘制消息钩子已在主循环 finally 中移除），编辑窗画面 + 边框保留
-    EditorCloseOverlays()
-    MaskOverlayDestroy(EditorMaskOv)
-    EditorMaskOv := 0
+    try {
+        EditorCloseOverlays()
+        MaskOverlayDestroy(EditorMaskOv)
+        EditorMaskOv := 0
 
-    ; 原图已并入缩放源（resSource 含全部内容），就地释放，不再随会话保留
-    Gdip_DisposeImage(baseBmp)
+        ; 原图已并入缩放源（resSource 含全部内容），就地释放，不再随会话保留
+        Gdip_DisposeImage(baseBmp)
 
-    ; 在画面右下角叠加缩放手柄并刷新分层窗口（画面本身原地保留，无感切换）
-    handle := PinHandleSize(localHwnd)
-    PinDrawGripOnto(workBmp, handle)
-    _PinUpdateLayer(localHwnd, workBmp)
+        ; 在画面右下角叠加缩放手柄并刷新分层窗口（画面本身原地保留，无感切换）
+        handle := PinHandleSize(localHwnd)
+        PinDrawGripOnto(workBmp, handle)
+        _PinUpdateLayer(localHwnd, workBmp)
 
-    ; 注册为钉屏会话（消息钩子常驻按 hwnd 分发，Esc 需求 +1），边框随会话移交
-    PinRegister(localHwnd, localGui, borders, winW, winH, resSource, workBmp, imgW, imgH, handle)
+        ; 注册为钉屏会话（消息钩子常驻按 hwnd 分发，Esc 需求 +1），边框随会话移交
+        PinRegister(localHwnd, localGui, borders, winW, winH, resSource, workBmp, imgW, imgH, handle)
+    } catch as e {
+        ; 交接中断：释放尚未被钉屏会话接管的本地位图/边框，避免编辑窗与资源泄漏（全局已清 0）
+        EditorCloseOverlays()
+        try MaskOverlayDestroy(EditorMaskOv)
+        EditorMaskOv := 0
+        BorderStripsDestroy(borders)
+        try Gdip_DisposeImage(baseBmp)
+        try Gdip_DisposeImage(bgBmp)
+        try Gdip_DisposeImage(bgBaseBmp)
+        try Gdip_DisposeImage(workBmp)
+        try Gdip_DisposeImage(resSource)
+        if IsObject(localGui)
+            try localGui.Destroy()
+        throw
+    }
 
     ; 不阻塞等待窗口关闭：清理挂到窗口 Close 事件（右键 / Esc → WinClose → WM_CLOSE 触发），
     ; 本函数立即返回，编辑线程随之结束，F1 热键恢复空闲，可继续截/钉下一张图（多张钉屏）

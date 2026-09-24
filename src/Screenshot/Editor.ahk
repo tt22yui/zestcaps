@@ -132,30 +132,30 @@ ShowEditor(pBitmap, region := 0, leftoverCleanup := 0, initialTool := "", initia
     ex := Min(Max(ex, wl), wr - EditorWinW)
     ey := Min(Max(ey, wt), wb - EditorWinH)
 
-    ; 预渲染分层缓存：基础层（原图缩放结果只算一次）+ 标注层（已提交标注聚合，初始为空）
-    ; 拖动标注预览只画 3 层，不再每帧重画历史标注
-    EditorBuildBase()
-    EditorBuildAnnotationLayer(EditorAnnotations)
-
-    ; 覆盖层（蒙版 + 边框）：优先接管截图阶段遗留（就地升级，三阶段同一套视觉资产），
-    ; 否则新建（独立调用场景）。蒙版挖洞到编辑窗、边框围绕编辑窗，与编辑窗同一帧生效
-    EditorMaskOv := (inherited && inherited.mask) ? inherited.mask : MaskOverlayCreate()
-    EditorBorders := (inherited && inherited.borders) ? inherited.borders : BorderStripsCreate()
-
-    ; 创建编辑窗（分层窗口：内容由 GDI+ 全量渲染）
-    EditorGui := Gui("-Caption +AlwaysOnTop -DPIScale +E0x80000")
-    EditorGui.MarginX := 0
-    EditorGui.MarginY := 0
-    EditorHwnd := EditorGui.Hwnd
-
-    ; 鼠标事件：左键按下/移动/松开（绘制），右键（取消进行中标注）
-    OnMessage(0x201, EditorLButtonDown)
-    OnMessage(0x200, EditorMouseMove)
-    OnMessage(0x202, EditorLButtonUp)
-    OnMessage(0x204, EditorRButtonDown)
-    OnMessage(0x20, EditorSetCursor)   ; WM_SETCURSOR：画笔/马赛克用圆环光标
-
     try {
+        ; 预渲染分层缓存：基础层（原图缩放结果只算一次）+ 标注层（已提交标注聚合，初始为空）
+        ; 拖动标注预览只画 3 层，不再每帧重画历史标注
+        EditorBuildBase()
+        EditorBuildAnnotationLayer(EditorAnnotations)
+
+        ; 覆盖层（蒙版 + 边框）：优先接管截图阶段遗留（就地升级，三阶段同一套视觉资产），
+        ; 否则新建（独立调用场景）。蒙版挖洞到编辑窗、边框围绕编辑窗，与编辑窗同一帧生效
+        EditorMaskOv := (inherited && inherited.mask) ? inherited.mask : MaskOverlayCreate()
+        EditorBorders := (inherited && inherited.borders) ? inherited.borders : BorderStripsCreate()
+
+        ; 创建编辑窗（分层窗口：内容由 GDI+ 全量渲染）
+        EditorGui := Gui("-Caption +AlwaysOnTop -DPIScale +E0x80000")
+        EditorGui.MarginX := 0
+        EditorGui.MarginY := 0
+        EditorHwnd := EditorGui.Hwnd
+
+        ; 鼠标事件：左键按下/移动/松开（绘制），右键（取消进行中标注）
+        OnMessage(0x201, EditorLButtonDown)
+        OnMessage(0x200, EditorMouseMove)
+        OnMessage(0x202, EditorLButtonUp)
+        OnMessage(0x204, EditorRButtonDown)
+        OnMessage(0x20, EditorSetCursor)   ; WM_SETCURSOR：画笔/马赛克用圆环光标
+
         ; 首帧渲染：先对隐藏窗口 UpdateLayeredWindow 再 Show，窗口一出现即为完整图像，避免空白矩形闪烁
         EditorRender()
         MaskOverlayHole(EditorMaskOv, ex, ey, EditorWinW, EditorWinH)
